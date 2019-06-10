@@ -4,6 +4,8 @@ This script is created for classes that loads the data in various different ways
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+
+import json
 import os
 
 # this class takes in knowns, unknowns, among other parameters, then searches
@@ -33,7 +35,9 @@ class DatasetFactory(object):
         self.object_data = pd.read_csv(self.object_data_path)
         self.action_data = pd.read_csv(self.action_data_path)
         self.class_key = pd.read_csv(self.class_key_path) 
-        
+        self.cache_filename = 'known_'+'_'.join([str(element) for element in sorted(self.unknown_classes)]) \
+                    +'unknown_'+'_'.join([str(element) for element in sorted(self.known_classes)]) +'.json'
+ 
         self.options = options
         # first search the cache folder
         if self.found_in_cache():
@@ -46,23 +50,20 @@ class DatasetFactory(object):
             print('Requirements not satisfied in cache, constructing dataset now...')
             self.dataset = self.construct_dataset()
             print('Done.')
-            cache_filename = 'known_'+'_'.join(sorted(self.unknown_classes)) \
-                    +'unknown_'+'_'.join(sorted(self.known_classes)) +'.json'
             print('Saving to file: ') 
-            with open(os.path.join(self.cache_folder, cache_filename), 'wb') as f:
+            with open(os.path.join(self.cache_folder, self.cache_filename), 'wb') as f:
                 data = json.dump(self.dataset, f)
             print('Done.')
-            
+    
+    def visualize_dataset_info(self):
+        pass
+
     def found_in_cache(self):
         # TODO
-        cache_filename = 'known_'+'_'.join(sorted(self.unknown_classes)) \
-                    +'unknown_'+'_'.join(sorted(self.known_classes)) +'.json'
-        return os.path.exists(os.path.join(self.cache_folder, cache_filename))
+        return os.path.exists(os.path.join(self.cache_folder, self.cache_filename))
 
     def load_cache(self):
-        cache_filename = 'known_'+'_'.join(sorted(self.unknown_classes)) \
-                    +'unknown_'+'_'.join(sorted(self.known_classes)) +'.json'
-        with open(os.path.join(self.cache_folder, cache_filename), 'rb') as f:
+        with open(os.path.join(self.cache_folder, self.cache_filename), 'rb') as f:
             return json.load(f)
          
     def construct_dataset(self):
