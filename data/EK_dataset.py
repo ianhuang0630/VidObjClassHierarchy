@@ -46,28 +46,41 @@ class DatasetFactory(object):
             print('Requirements not satisfied in cache, constructing dataset now...')
             self.dataset = self.construct_dataset()
             print('Done.')
+            cache_filename = 'known_'+'_'.join(sorted(self.unknown_classes)) \
+                    +'unknown_'+'_'.join(sorted(self.known_classes)) +'.json'
+            print('Saving to file: ') 
+            with open(os.path.join(self.cache_folder, cache_filename), 'wb') as f:
+                data = json.dump(self.dataset, f)
+            print('Done.')
+            
     def found_in_cache(self):
         # TODO
-        return False
+        cache_filename = 'known_'+'_'.join(sorted(self.unknown_classes)) \
+                    +'unknown_'+'_'.join(sorted(self.known_classes)) +'.json'
+        return os.path.exists(os.path.join(self.cache_folder, cache_filename))
 
     def load_cache(self):
-        # TODO
-        pass
-    
+        cache_filename = 'known_'+'_'.join(sorted(self.unknown_classes)) \
+                    +'unknown_'+'_'.join(sorted(self.known_classes)) +'.json'
+        with open(os.path.join(self.cache_folder, cache_filename), 'rb') as f:
+            return json.load(f)
+         
     def construct_dataset(self):
         print('Constructing datasets')
         # first get_coexistence_candidates() or get_known_unknown_candidates()
         if self.options == 'coexistence':
             video_candidates = self.get_coexistence_candidates()
+            raise ValueError('Not fully implemented.')
             return None
         elif self.options == 'separate':
             video_candidates = self.get_known_unknown_candidates()
-            return self.search_known_unknown(video_candidates)
+            unknown_clips = self.search_known_unknown(video_candidates)
+            known_videos = self.organize_known(video_candidates)
+            return {'known': known_videos, 'unknown': unknown_clips}
         # filter candidates
         else:
             raise ValueError('{} not recognized as an option'.format(self.options))
         print('Done.')
-        
 
     def get_coexistence_candidates(self):
         # filter out data with both known and unknowns
@@ -153,7 +166,21 @@ class DatasetFactory(object):
                                         'end_frame': end_frame,
                                         'noun_class': class_})
         return dataset 
-         
+    
+    def organize_known(self, video_candidates):
+        dataset = []
+        for video in video_candidates['known']:
+            video_id = video[0]
+            participant_id = video[1]
+            start_frame = min(video[2]['frame'])
+            end_frame = max(video[2]['frame'])
+            class_= list(set(video[2]['noun_class']).intersection(set(self.known_classes)))
+            dataset.append({'video_id': video_id,
+                            'participant_id':participant_id,
+                            'start_frame': start_frame,
+                            'end_frame': end_frame,
+                            'noun_class': class_}) 
+
     def window_search_coexistence(self):
         pass
 
