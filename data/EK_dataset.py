@@ -26,7 +26,7 @@ class DatasetFactory(object):
         self.action_data_path = action_data_path
         self.class_key_path = class_key_path
         if not os.path.exists(cache_folder):
-            os.path.makedirs(cache_folder, exist_ok=True)
+            os.makedirs(cache_folder, exist_ok=True)
         # path to the cache folder
         self.cache_folder = cache_folder
         # loading all datasets using pandas
@@ -35,7 +35,6 @@ class DatasetFactory(object):
         self.class_key = pd.read_csv(self.class_key_path) 
         
         self.options = options
-
         # first search the cache folder
         if self.found_in_cache():
             # loading cache
@@ -81,7 +80,7 @@ class DatasetFactory(object):
                 # check within this df if it contains both known classes and
                 # unknown classes. If at least one of each is present, add to list.
                 bb_subsub_df = subsub_df.loc[subsub_df['bounding_boxes']!='[]']
-                nc_bb_subsub_df = set(self.bb_subsub_df['noun_class'])
+                nc_bb_subsub_df = set(bb_subsub_df['noun_class'])
                 
                 if np.any([element in nc_bb_subsub_df for element in self.known_classes]) \
                     and np.any([element in nc_bb_subsub_df for element in self.unknown_classes]):
@@ -100,7 +99,7 @@ class DatasetFactory(object):
                 # check within this df if it contains both known classes and
                 # unknown classes. If at least one of each is present, add to list.
                 bb_subsub_df = subsub_df.loc[subsub_df['bounding_boxes']!='[]']
-                nc_bb_subsub_df = set(self.bb_subsub_df['noun_class'])
+                nc_bb_subsub_df = set(bb_subsub_df['noun_class'])
                 
                 if np.any([element in nc_bb_subsub_df for element in self.known_classes]):
                     video_candidates['known'].append((subject, video_id, subsub_df)) 
@@ -117,12 +116,12 @@ class DatasetFactory(object):
         # every single class in only unknonw (if mode is known_unknown)
         dataset = []
         for video in video_candidates['unknown']:
-            video_id = video['video_id']
-            participant_id = video['participant_id']
+            video_id = video[0]
+            participant_id = video[1]
             # helpful datastructures 
             states_dict = {element: 'off' for element in self.unknown_classes}
             stacks_dict = {element: [] for element in self.unknown_classes}
-            sorted_video = video.sort_values(by=['frame']) 
+            sorted_video = video[2].sort_values(by=['frame']) 
             
             # now proceed to find the clips.
             frames_and_classes = []
@@ -137,15 +136,14 @@ class DatasetFactory(object):
                     if row['bounding_boxes'] != '[]':
                         frames_and_classes[-1].append(row['noun_class'])
                 else:
-                    raise ValueError("current frame is {} but frame_index is {}".\ 
-                            format(row['frame'], frame_index))
+                    raise ValueError("current frame is {} but frame_index is {}".format(row['frame'], frame_index))
 
-            for idx, element in enumerate(frames_and_classes):
+            for idx, element in enumerate(tqdm(frames_and_classes)):
                 for class_ in states_dict:
                     if class_ in element[1:] and states_dict[class_] == 'off':
                         stacks_dict[class_].append(element[0])
                         states_dict[class_] = 'on'
-                    if (class_ not in element[1:] and states_dict[class_] == 'on') or idx == len(frames_and_classes)-1:
+                    if (class_ not in element[1:] and states_dict[class_] == 'on') or (idx == len(frames_and_classes)-1 and states_dict[class_]=='on'):
                         end_frame = frames_and_classes[idx-1][0]
                         start_frame = stacks_dict[class_].pop()
                         states_dict[class_] = 'off'
@@ -189,10 +187,9 @@ if __name__=='__main__':
     object_df = pd.read_csv(train_object_csvpath)
     class_key_df = pd.read_csv(class_key_csvpath)
     class_key_dict = dict(zip(class_key_df.class_key, class_key_df.noun_id))
-    knowns = ['plan', 'onion'] 
+    knowns = ['pan', 'onion'] 
     unknowns = ['plate', 'meat']
     knowns_id = [class_key_dict[element] for element in knowns]
     unknowns_id = [class_key_dict[element] for element in unknowns]
-    
     DF = DatasetFactory(knowns_id, unknowns_id, train_object_csvpath, train_action_csvpath, class_key_csvpath)
     
