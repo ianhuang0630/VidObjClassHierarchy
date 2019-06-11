@@ -36,7 +36,7 @@ class DatasetFactory(object):
         self.action_data = pd.read_csv(self.action_data_path)
         self.class_key = pd.read_csv(self.class_key_path) 
         self.cache_filename = 'known_'+'_'.join([str(element) for element in sorted(self.unknown_classes)]) \
-                    +'unknown_'+'_'.join([str(element) for element in sorted(self.known_classes)]) +'.json'
+                    +'_unknown_'+'_'.join([str(element) for element in sorted(self.known_classes)]) +'.json'
  
         self.options = options
         # first search the cache folder
@@ -51,8 +51,8 @@ class DatasetFactory(object):
             self.dataset = self.construct_dataset()
             print('Done.')
             print('Saving to file: ') 
-            with open(os.path.join(self.cache_folder, self.cache_filename), 'wb') as f:
-                data = json.dump(self.dataset, f)
+            with open(os.path.join(self.cache_folder, self.cache_filename), 'w') as f:
+            	json.dump(self.dataset, f)  
             print('Done.')
     
     def visualize_dataset_info(self):
@@ -63,7 +63,7 @@ class DatasetFactory(object):
         return os.path.exists(os.path.join(self.cache_folder, self.cache_filename))
 
     def load_cache(self):
-        with open(os.path.join(self.cache_folder, self.cache_filename), 'rb') as f:
+        with open(os.path.join(self.cache_folder, self.cache_filename), 'r') as f:
             return json.load(f)
          
     def construct_dataset(self):
