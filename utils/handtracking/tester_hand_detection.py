@@ -82,4 +82,6 @@ if __name__ == '__main__':
                                           boxes[i][0] * im_height, boxes[i][2] * im_height)
             plt.scatter([left, left, right, right],[top, bottom, top, bottom])
             print(left, right, top, bottom)
-    plt.show()
+    plt.figsave('tester_output.jpg')
+
+
