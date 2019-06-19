@@ -3,21 +3,25 @@ import torch
 import tensorflow as tf
 import numpy as np
 import scipy as sp
-from scipy.misc import imread
+from scipy.misc import imread, imresize
 import json
+import pickle
 
 # necessary tools for hand position estimation
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import import Axes3D
-from hand3d.nets.ColorHandPose3DNetwork import ColorHandPose3DNetwork
-from hand3d.utils.general import detect_keypoints, trafo_coords, plot_hand, plot_hand_3d
+import sys
+sys.path.insert(0, 'utilities/hand3d/')
+
+from mpl_toolkits.mplot3d import Axes3D
+from utils.general import detect_keypoints, trafo_coords, plot_hand, plot_hand_3d
+from nets.ColorHandPose3DNetwork import ColorHandPose3DNetwork
 
 # running from the top level directory
 
 class HandPositionEstimator(object):
-    def __init__(self, model_weight_files=['./utils/hand3d/weights/handsegnet-rhd.pickle', 
-            './utils/hand3d/weights/posenet3d-rhd-stb-slr-finetuned.pickle'], visualize=True, 
-            visual_save_loc='visualize/handpose_estimation',
+    def __init__(self, model_weight_files=['./utilities/hand3d/weights/handsegnet-rhd.pickle', 
+            './utilities/hand3d/weights/posenet3d-rhd-stb-slr-finetuned.pickle'], visualize=True, 
+            visualize_save_loc='visualize/handpose_estimation',
             cache_loc='cache/handpose_estimation', image_extension='.jpg',
             overwrite=False):
 
@@ -33,15 +37,15 @@ class HandPositionEstimator(object):
             os.makedirs(self.cache_loc)
         self.overwrite = overwrite 
 
-	# input place holders 
-	self.image_tf = tf.placeholder(tf.float32, shape=(1, 240, 320, 3))
-	self.hand_side_tf = tf.constant([[1.0, 0.0]])  # left hand (true for all samples provided)
-	self.evaluation = tf.placeholder_with_default(True, shape=())
+        # input place holders 
+        self.image_tf = tf.placeholder(tf.float32, shape=(1, 240, 320, 3))
+        self.hand_side_tf = tf.constant([[1.0, 0.0]])  # left hand (true for all samples provided)
+        self.evaluation = tf.placeholder_with_default(True, shape=())
         
-        # building network	
-	self.net = ColorHandPose3DNetwork()
-	self.hand_scoremap_tf, self.image_crop_tf, self.scale_tf, self.center_tf,\
-	self.keypoints_scoremap_tf, self.keypoint_coord3d_tf = \
+        # building network      
+        self.net = ColorHandPose3DNetwork()
+        self.hand_scoremap_tf, self.image_crop_tf, self.scale_tf, self.center_tf,\
+        self.keypoints_scoremap_tf, self.keypoint_coord3d_tf = \
         self.net.inference(self.image_tf, self.hand_side_tf, self.evaluation)
 
         # Start TF
@@ -59,19 +63,19 @@ class HandPositionEstimator(object):
         results = []
 
         for image_name, image_raw in image_list:
-            save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.json'
+            save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl'
             if os.path.exists(save_name) and not self.overwrite:
                 # loading directly from cache
-                with open(save_name, 'r') as f:
-                    results.append(json.load(f))
+                with open(save_name, 'rb') as f:
+                    results.append(pickle.load(f))
 
             else:
-                image_raw = scipy.misc.imresize(image_raw, (240, 320))
+                image_raw = imresize(image_raw, (240, 320))
                 image_v = np.expand_dims((image_raw.astype('float') / 255.0) - 0.5, 0)
                 
                 hand_scoremap_v, image_crop_v, scale_v, center_v,\
                 keypoints_scoremap_v, keypoint_coord3d_v = \
-                sess.run([self.hand_scoremap_tf, self.image_crop_tf, self.scale_tf, 
+                self.sess.run([self.hand_scoremap_tf, self.image_crop_tf, self.scale_tf, 
                         self.center_tf, self.keypoints_scoremap_tf, self.keypoint_coord3d_tf],
                                         feed_dict={self.image_tf: image_v})
 
@@ -89,12 +93,12 @@ class HandPositionEstimator(object):
                 image_result = {'image_name': image_name,
                                 'binary_mask': np.argmax(hand_scoremap_v, 2),
                                 'hand_joints_2d': coord_hw_crop,
-                                'hand_joints_3d': keypoint_coord3d_v})
+                                'hand_joints_3d': keypoint_coord3d_v}
                 
                 # assuming that there is a 4-character extension like .jpg for the
                 # image name
-                with open(save_name, 'w') as f:
-                    json.dump(image_result, f)
+                with open(save_name, 'wb') as f:
+                    pickle.dump(image_result, f)
 
                 results.append(image_result)
                 if self.visualize:
