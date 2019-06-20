@@ -19,8 +19,11 @@ from nets.ColorHandPose3DNetwork import ColorHandPose3DNetwork
 # running from the top level directory
 
 class HandPositionEstimator(object):
-    def __init__(self, model_weight_files=['./utilities/hand3d/weights/handsegnet-rhd.pickle', 
-            './utilities/hand3d/weights/posenet3d-rhd-stb-slr-finetuned.pickle'], visualize=True, 
+    
+    def __init__(self, 
+            model_weight_files=['./utilities/hand3d/weights/handsegnet-rhd.pickle', 
+            './utilities/hand3d/weights/posenet3d-rhd-stb-slr-finetuned.pickle'], 
+            visualize=False, 
             visualize_save_loc='visualize/handpose_estimation',
             cache_loc='cache/handpose_estimation', image_extension='.jpg',
             overwrite=False):
@@ -34,7 +37,7 @@ class HandPositionEstimator(object):
                 os.makedirs(self.visualize_save_loc, exist_ok=True) 
         self.cache_loc = cache_loc
         if not os.path.exists(self.cache_loc):
-            os.makedirs(self.cache_loc)
+            os.makedirs(self.cache_loc, exist_ok=True)
         self.overwrite = overwrite 
 
         # input place holders 
@@ -90,7 +93,10 @@ class HandPositionEstimator(object):
                 coord_hw = trafo_coords(coord_hw_crop, center_v, scale_v, 256)
 
                 # return
+                # TODO: these coordinates are all normalized with respect to
+                # the rescaled image. aprameters would have to be scaled back.
                 image_result = {'image_name': image_name,
+                                'confidence': hand_scoremap_v,
                                 'binary_mask': np.argmax(hand_scoremap_v, 2),
                                 'hand_joints_2d': coord_hw_crop,
                                 'hand_joints_3d': keypoint_coord3d_v}
@@ -122,20 +128,172 @@ class HandPositionEstimator(object):
                     image_save_name = os.path.join(self.visualize_save_loc, 
                             os.path.basename(image_name))
                     plt.savefig(image_save_name)
+        return results
 
-class HandDetector(object):
+class HandPositionEstimator2(object):
+    """ Implementation using different package than HandPositionEstimator2
+    """
     def __init__(self):
         pass
+
+    def process(self, image_list):
+        pass
+
+class HandDetector(object):
+    def __init__(self, margin = [20, 20], orderby = 'total_confidence',
+                    area_threshold = 0, average_confidence_threshold = 0.0,
+                    cache_loc='cache/hand_bounding_boxes', image_extension='.jpg',
+                    overwrite=False):
+        """
+        Args:
+            margin: tuple of the margin expected around each contguous section
+        """
+        self.margin = margin
+        self.orderby = orderby
+        assert self.orderby in ['total_confidence', 'area'], \
+                'orderby option is invalid, please either choose "total_confidence" or area'
+        self.area_threshold = area_threshold
+        self.average_confidence_threshold = average_confidence_threshold
+
+        if not os.path.exists(self.cache_loc):
+            os.makedirs(self.cache_loc, exist_ok=True)
+        self.overwrite = overwrite 
+        
+
+    def find_contiguous_areas(self, mask, position):
+        """
+        Args:
+            mask: boolean np array
+            position: list of indices
+        """
+        
+        assert len(position) ==2, 'only two coordinates allowed.'
+        this_island = []
+        if mask[position[0], position[1]] and not self.visited[position[0], position[1]]:
+            self.visited[position[0], position[1]] = 1 # we've now visited this 
+            # now we look at the neighbors
+            for i in range(max(0, position[0]-1), min(mask.shape[0]-1, position[0]+1)+1):
+                for j in range(max(0, position[1]-1), min(mask.shape[1]-1, position[1]+1)+1):
+                    if i != position[0] and j != position[1]:
+                        neighbor_islands = self.find_contiguous_areas(mask, [i,j])
+                        this_island.extend(neighbor_islands)
+
+        return this_island 
+
+    def process(self, masks):
+        """
+        Very naive crop of the hand region based on binary masks provided
+        Args:
+            masks: list of tuple, first element being the image name, and
+                second element being the binary_mask, third element being
+                the confidence matrix for hand vs. non-hand.
+        """
+        hands = [] 
+        # finding the two largest contiguous area
+        for mask_tuple in masks:
+            image_name = mask_tuple[0]
+            mask = mask_tuple[1]
+            confidence = mask_tuple[2][:,:,1] # we only care about the probability that it's a hand
+            
+            # save_name
+            save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl' 
+            # check if file already exists
+            if os.path.exists(save_name) and not self.overwrite:
+                with open(save_name, 'rb') as f:
+                    hands.append(pickle.load(f)) 
+            else:
+                # se tall unvisisted
+                self.visited = np.zeros_like(mask)
+                contiguous_sets = [] 
+                for i in range(mask.shape[-1]):
+                    for j in range(mask.shape[0]):
+                        if not self.visited[i,j]:
+                            contiguous_set = self.find_contiguous_areas(mask, [i,j])
+                            if len(contiguous_set) > 0:
+                                contiguous_sets.append(contiguous_set)
+                
+                bounding_boxes = []
+
+                for set_ in contiguous_sets:
+                    bottom_y = max([element[0] for element in set_])
+                    top_y = min([element[0] for element in set_])
+                    assert bottom_y >= top_y, 'bottom_y < top_y'
+                    right_x = max([element[1] for element in set_])
+                    left_x = min([element[1] for element in set_])
+                    assert right_x >= left_x, 'right_x < left_x'
+                    
+                    x_center = np.mean([left_x, right_x])
+                    y_center = np.mean([bottom_y, top_y])
+                    
+                    margin_bottom_y = min(bottom_y +  self.margin[0], mask.shape[0]-1)
+                    margin_top_y = max(top_y - self.margin[0], 0)
+                    margin_right_x= min(right_x + self.margin[1], mask.shape[1]-1)
+                    margin_left_x = max(left_x - self.margin[1], 0)
+                     
+                    # calculating overall confidence 
+                    total_confidence = sum[confidence[element[0], element[1]] for element in set_]
+                    area = len(set_)
+                    
+                    # verify that the object is at least above some area threshold
+                    if area > self.area_threshold:    
+                        bounding_boxes.append(((margin_bottom_y, margin_top_y, 
+                            margin_right_x, margin_left_x), total_confidence, area,
+                            x_center, y_center))
+                    
+                # depending on the option in the ordering, we can either order by
+                # total_confidence or area.
+                if self.orderby == 'area':
+                    # order by area, second element in the tuples
+                    sorted_bounding_boxes = sorted(bounding_boxes, key=lambda x: x[2], reverse=True)
+                elif self.orderby == 'total_confidence':
+                    # order by total_confidence, second element in the tuples
+                    sorted_bounding_boxes = sorted(bounding_boxes, key=lambda x: x[1], reverse=True) 
+                     
+                if len(sorted_bounding_boxes) >= 2:
+                    hand_bounding_boxes = sorted_bounding_boxes[:2]
+                    left_to_right = sorted(hand_bounding_boxes, key=lambda x: x[3])
+                    
+                    hand = {'left': self.format_bounding_box(left_to_right[0]),
+                            'right': self.format_bounding_box(left_to_right[1])}
+                    # TODO: decide which hand is which
+                elif len(sorted_bounding_boxes) == 1:
+                    # TODO:just decide which hand it is
+                    if sorted_bounding_boxes[0][3] >= (mask.shape[2]-1)/2.0: # if the midpoint is more than halfway
+                        hand = {'right': self.format_bounding_box(sorted_bounding_boxes[0])}
+                    else:
+                        hand = {'left': self.format_bounding_box(sorted_bounding_boxes[0])}
+                else:
+                    # TODO: do nothing
+                    hand = {}
+                
+                hand_result = {'image_name': image_name, 'hand': hand}
+                # appending to hands
+                hands.append(hand_result)
+                
+                # save into cache
+                with open(save_name, 'wb') as f:
+                    pickle.dump(hand_result, f)
+                
+        return hands
+
+    def format_bounding_box(self, tup):
+        return {'bottom_y': tup[0][0], 'top_y': tup[0][1], 'left_x': tup[0][2], 'right_x': tup[0][3],
+                'total_confidence': tup[1], 'boolean_area': tup[2],
+                'boolean_x_center': tup[3], 'boolean_y_center': tup[4]}
+
 
 class HandMeshPredictor(object):
     def __init__(self):
         pass
 
+    def process (self, image):
+        pass
 
 if __name__=='__main__':
     # load the hand positions and estimate rough hand pose
     HPE = HandPositionEstimator()
-    test_images = [['/viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg', imread('viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg')] ] 
+    test_images = [['/viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg', 
+        imread('viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg')] ] 
     HPE.process(test_images)
     # generate bounding boxes for each image
 
