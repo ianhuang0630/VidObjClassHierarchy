@@ -154,11 +154,11 @@ class HandDetector(object):
                 'orderby option is invalid, please either choose "total_confidence" or area'
         self.area_threshold = area_threshold
         self.average_confidence_threshold = average_confidence_threshold
-
+        self.cache_loc = cache_loc
         if not os.path.exists(self.cache_loc):
             os.makedirs(self.cache_loc, exist_ok=True)
         self.overwrite = overwrite 
-        
+        self.extension_length = len(image_extension) 
 
     def find_contiguous_areas(self, mask, position):
         """
@@ -171,6 +171,7 @@ class HandDetector(object):
         this_island = []
         if mask[position[0], position[1]] and not self.visited[position[0], position[1]]:
             self.visited[position[0], position[1]] = 1 # we've now visited this 
+            this_island.append(position)
             # now we look at the neighbors
             for i in range(max(0, position[0]-1), min(mask.shape[0]-1, position[0]+1)+1):
                 for j in range(max(0, position[1]-1), min(mask.shape[1]-1, position[1]+1)+1):
@@ -191,9 +192,11 @@ class HandDetector(object):
         hands = [] 
         # finding the two largest contiguous area
         for mask_tuple in masks:
+            import ipdb; ipdb.set_trace()
             image_name = mask_tuple[0]
             mask = mask_tuple[1]
-            confidence = mask_tuple[2][:,:,1] # we only care about the probability that it's a hand
+
+            confidence = np.exp(mask_tuple[2][:,:,1])/ np.sum(np.exp(mask_tuple[2]),2)
             
             # save_name
             save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl' 
@@ -205,8 +208,8 @@ class HandDetector(object):
                 # se tall unvisisted
                 self.visited = np.zeros_like(mask)
                 contiguous_sets = [] 
-                for i in range(mask.shape[-1]):
-                    for j in range(mask.shape[0]):
+                for i in range(mask.shape[0]):
+                    for j in range(mask.shape[1]):
                         if not self.visited[i,j]:
                             contiguous_set = self.find_contiguous_areas(mask, [i,j])
                             if len(contiguous_set) > 0:
@@ -231,7 +234,7 @@ class HandDetector(object):
                     margin_left_x = max(left_x - self.margin[1], 0)
                      
                     # calculating overall confidence 
-                    total_confidence = sum[confidence[element[0], element[1]] for element in set_]
+                    total_confidence = sum([confidence[element[0], element[1]] for element in set_])
                     area = len(set_)
                     
                     # verify that the object is at least above some area threshold
@@ -255,17 +258,14 @@ class HandDetector(object):
                     
                     hand = {'left': self.format_bounding_box(left_to_right[0]),
                             'right': self.format_bounding_box(left_to_right[1])}
-                    # TODO: decide which hand is which
                 elif len(sorted_bounding_boxes) == 1:
-                    # TODO:just decide which hand it is
                     if sorted_bounding_boxes[0][3] >= (mask.shape[2]-1)/2.0: # if the midpoint is more than halfway
                         hand = {'right': self.format_bounding_box(sorted_bounding_boxes[0])}
                     else:
                         hand = {'left': self.format_bounding_box(sorted_bounding_boxes[0])}
                 else:
-                    # TODO: do nothing
                     hand = {}
-                
+                # TODO: rescaling back to original image 
                 hand_result = {'image_name': image_name, 'hand': hand}
                 # appending to hands
                 hands.append(hand_result)
@@ -291,10 +291,12 @@ class HandMeshPredictor(object):
 
 if __name__=='__main__':
     # load the hand positions and estimate rough hand pose
-    HPE = HandPositionEstimator()
-    test_images = [['/viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg', 
+    HPE = HandPositionEstimator(overwrite=True)
+    test_images = [['viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg', 
         imread('viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg')] ] 
-    HPE.process(test_images)
+    results = HPE.process(test_images)
+    input_ = [(element['image_name'], element['binary_mask'], element['confidence']) for element in results]
     # generate bounding boxes for each image
-
+    HD = HandDetector(overwrite=True)
+    hand_bounding_box_results = HD.process(input_)
     # more find grained hand mesh prediction
