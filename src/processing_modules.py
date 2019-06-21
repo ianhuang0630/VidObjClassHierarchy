@@ -73,6 +73,7 @@ class HandPositionEstimator(object):
                     results.append(pickle.load(f))
 
             else:
+                image_raw_shape = image_raw.shape[:2] 
                 image_raw = imresize(image_raw, (240, 320))
                 image_v = np.expand_dims((image_raw.astype('float') / 255.0) - 0.5, 0)
                 
@@ -96,6 +97,7 @@ class HandPositionEstimator(object):
                 # TODO: these coordinates are all normalized with respect to
                 # the rescaled image. aprameters would have to be scaled back.
                 image_result = {'image_name': image_name,
+                                'original_shape': image_raw_shape,
                                 'confidence': hand_scoremap_v,
                                 'binary_mask': np.argmax(hand_scoremap_v, 2),
                                 'hand_joints_2d': coord_hw_crop,
@@ -197,7 +199,7 @@ class HandDetector(object):
             mask = mask_tuple[1]
 
             confidence = np.exp(mask_tuple[2][:,:,1])/ np.sum(np.exp(mask_tuple[2]),2)
-            
+            image_raw_shape = mask_tuple[3] 
             # save_name
             save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl' 
             # check if file already exists
@@ -256,16 +258,17 @@ class HandDetector(object):
                     hand_bounding_boxes = sorted_bounding_boxes[:2]
                     left_to_right = sorted(hand_bounding_boxes, key=lambda x: x[3])
                     
-                    hand = {'left': self.format_bounding_box(left_to_right[0]),
-                            'right': self.format_bounding_box(left_to_right[1])}
+                    hand = {'left': self.rescale(self.format_bounding_box(left_to_right[0]), image_raw_shape),
+                            'right': self.rescale(self.format_bounding_box(left_to_right[1]), image_raw_shape)}
                 elif len(sorted_bounding_boxes) == 1:
                     if sorted_bounding_boxes[0][3] >= (mask.shape[2]-1)/2.0: # if the midpoint is more than halfway
-                        hand = {'right': self.format_bounding_box(sorted_bounding_boxes[0])}
+                        hand = {'right': self.rescale(self.format_bounding_box(sorted_bounding_boxes[0]), image_raw_shape)}
                     else:
-                        hand = {'left': self.format_bounding_box(sorted_bounding_boxes[0])}
+                        hand = {'left': self.rescale(self.format_bounding_box(sorted_bounding_boxes[0]), image_raw_shape)}
                 else:
                     hand = {}
                 # TODO: rescaling back to original image 
+
                 hand_result = {'image_name': image_name, 'hand': hand}
                 # appending to hands
                 hands.append(hand_result)
@@ -280,7 +283,15 @@ class HandDetector(object):
         return {'bottom_y': tup[0][0], 'top_y': tup[0][1], 'left_x': tup[0][2], 'right_x': tup[0][3],
                 'total_confidence': tup[1], 'boolean_area': tup[2],
                 'boolean_x_center': tup[3], 'boolean_y_center': tup[4]}
-
+    
+    def rescale(dict_, image_raw_shape):
+        dict_2 = dict_.copy()
+        dict_2['bottom_y'] = np.round(dict_['bottom_y']/ 240.0 * image_raw_shape[0])
+        dict_2['top_y'] = np.round(dict_['top_y']/ 240.0 * image_raw_shape[0])
+        dict_2['left_x'] = np.round(dict_['left_x']/ 320.0 * image_raw_shape[1])
+        dict_2['right_x'] = np.round(dict_['right_x']/ 320.0 * image_raw_shape[1])
+        
+        return dict_2
 
 class HandMeshPredictor(object):
     def __init__(self):
@@ -295,7 +306,8 @@ if __name__=='__main__':
     test_images = [['viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg', 
         imread('viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg')] ] 
     results = HPE.process(test_images)
-    input_ = [(element['image_name'], element['binary_mask'], element['confidence']) for element in results]
+    input_ = [(element['image_name'], element['binary_mask'], element['confidence'], 
+        element['original_shape']) for element in results]
     # generate bounding boxes for each image
     HD = HandDetector(overwrite=True)
     hand_bounding_box_results = HD.process(input_)
