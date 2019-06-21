@@ -309,7 +309,15 @@ class HandMeshPredictor(object):
     def __init__(self, 
             resume_checkpoint='utilities/obman_train/release_models/obman/checkpoint.pth.tar',
             mano_root='utilities/obman_train/misc/mano',
-            no_beta=True):
+            no_beta=True,cache_loc='cache/hand_mesh', image_extension='.jpg',
+            overwrite=False ):
+    
+        self.overwrite = overwrite
+        self.extension_length = len(image_extension)
+        self.cache_loc = cache_loc
+        if not os.path.exists(self.cache_loc):
+            os.makedirs(self.cache_loc, exist_ok=True)
+
         self.resume = resume_checkpoint
         self.checkpoint = os.path.dirname(self.resume)
         with open(os.path.join(self.checkpoint, 'opt.pkl'), 'rb') as opt_f:
@@ -343,32 +351,41 @@ class HandMeshPredictor(object):
                 second element is a dictionary with the hand bounding_boxes 
                 as well as other information
         """
+        hand_mesh_list = []
         for image_name, hand_info in image_list:
-             
-            # crop the image for the left hand
-            # pass through the model
-            for which_hand in ['left', 'right']:
-                if which_hand in hand_info:
-                    image_raw = cv2.imread(image_name)
-                    # cropping the hand
-                    crop = image_raw[int(hand_info[which_hand]['top_y']):int(hand_info[which_hand]['bottom_y'])+1, 
-                                int(hand_info[which_hand]['left_x']):int(hand_info[which_hand]['right_x'])+1, :]
-                    frame= preprocess_frame(crop)
-                    img = Image.fromarray(frame.copy())
-                    hand_crop = cv2.resize(np.array(img), (256, 256)) 
-                    
-                    if which_hand == 'left':
-                        hand_image = prepare_input(hand_crop, flip_left_right=False)
-                    elif which_hand == 'right':
-                        hand_image= prepare_input(hand_crop, flip_left_right=True)
+            save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl'  
+            if os.path.exists(save_name) and not self.overwrite:
+                with open(save_naem, 'rb')  as f :
+                    hand_mesh_list.append(pickle.load(f))   
+            else:
+                hand_mesh = {}
+                # crop the image for the left hand
+                # pass through the model
+                for which_hand in ['left', 'right']:
+                    if which_hand in hand_info:
+                        image_raw = cv2.imread(image_name)
+                        # cropping the hand
+                        crop = image_raw[int(hand_info[which_hand]['top_y']):int(hand_info[which_hand]['bottom_y'])+1, 
+                                    int(hand_info[which_hand]['left_x']):int(hand_info[which_hand]['right_x'])+1, :]
+                        frame= preprocess_frame(crop)
+                        img = Image.fromarray(frame.copy())
+                        hand_crop = cv2.resize(np.array(img), (256, 256)) 
+                        
+                        if which_hand == 'left':
+                            hand_image = prepare_input(hand_crop, flip_left_right=False)
+                        elif which_hand == 'right':
+                            hand_image= prepare_input(hand_crop, flip_left_right=True)
 
-                    output = self.forward_pass_3d(self.model, hand_image)
-                    flip_verts = output["verts"].cpu().detach().numpy()[0]
-                    
-
-            # crop the image for the right hand (if applicable)
-            # pass through the model
-            pass
+                        output = self.forward_pass_3d(self.model, hand_image)
+                        verts = output['verts'].cpu().detach().numpy()[0]
+                        joints = output['joints'].cpu().detach().numpy()[0]
+                        hand_mesh[which_hand] = {'verts': verts, 'joints': joints}
+                
+                hand_mesh_list.append(hand_mesh)
+                # save into cache
+                with open(save_name, 'wb') as f:
+                    pickle.dump(hand_mesh, f)
+                
 
 if __name__=='__main__':
     # load the hand positions and estimate rough hand pose
