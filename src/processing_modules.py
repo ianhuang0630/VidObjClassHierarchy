@@ -16,6 +16,18 @@ from mpl_toolkits.mplot3d import Axes3D
 from utils.general import detect_keypoints, trafo_coords, plot_hand, plot_hand_3d
 from nets.ColorHandPose3DNetwork import ColorHandPose3DNetwork
 
+# necessary tools for hand mesh prediction
+sys.path.insert(0, 'utilities/obman_train')
+import cv2
+from PIL import Image
+
+from handobjectdatasets.queries import TransQueries, BaseQueries
+from mano_train.exputils import argutils
+from mano_train.netscripts.reload import reload_model
+from mano_train.visualize import displaymano
+from mano_train.demo.preprocess import prepare_input, preprocess_frame
+
+
 # running from the top level directory
 
 class HandPositionEstimator(object):
@@ -293,11 +305,58 @@ class HandDetector(object):
         return dict_2
 
 class HandMeshPredictor(object):
-    def __init__(self):
-        pass
+    def __init__(self, 
+            resume_checkpoint='utilities/obman_train/release_models/obman/checkpoint.pth.tar',
+            no_beta=True):
+        self.resume = resume_checkpoint
+        self.checkpoint = os.path.dirname(self.resume)
+        with open(os.path.join(checkpoint, 'opt.pkl'), 'rb') as opt_f:
+            self.opts = pickle.load(opt_f)
+        self.no_beta = no_beta 
+        self.model = reload_model(self.resume, self.opts, self.no_beta)
+        self.model.eval()
+        # model should be loaded now
+        
+    def process (self, image_list):
+        """
+        Args:
+            image_list: list of tuples, where first element is an image_name,
+                second element is a dictionary with the hand bounding_boxes 
+                as well as other information
+        """
+        for image_name, hand_info in image_list:
+             
+            # crop the image for the left hand
+            # pass through the model
+            for which_hand in ['left', 'right']:
+                if which_hand in hand_info:
+                    image_raw = cv2.imread(image_name)
+                    # cropping the hand
+                    crop = image_raw[hand_info['left']['top_y']:hand_info['left']['bottom_y']+1, 
+                                hand_info['left']['left_x']:hand_info['left']['right_x']+1, :]
+                    frame= preprocess_frame(crop)
+                    img = Image.fromarray(frame.copy())
+                    hand_crop = cv2.resize(np.array(img), (256, 256)) 
+                    
+                    if which_hand == 'left':
+                        hand_image = prepare_input(hand_crop, flip_left_right=False)
+                    
+                    if which_hand == 'right':
+                        flip_hand_image = prepare_input(hand_crop, flip_left_right=True)
 
-    def process (self, image):
-        pass
+                    noflip_output = forward_pass_3d(model, noflip_hand_image)
+                    flip_output = forward_pass_3d(model, flip_hand_image)
+                    
+                    import ipdb; ipdb.set_trace() 
+                    flip_verts = flip_output["verts"].cpu().detach().numpy()[0]
+                    noflip_verts = noflip_output["verts"].cpu().detach().numpy()[0] 
+                    
+
+            # crop the image for the right hand (if applicable)
+            # pass through the model
+            
+
+            pass
 
 if __name__=='__main__':
     # load the hand positions and estimate rough hand pose
