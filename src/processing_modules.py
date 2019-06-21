@@ -194,7 +194,6 @@ class HandDetector(object):
         hands = [] 
         # finding the two largest contiguous area
         for mask_tuple in masks:
-            import ipdb; ipdb.set_trace()
             image_name = mask_tuple[0]
             mask = mask_tuple[1]
 
@@ -284,7 +283,7 @@ class HandDetector(object):
                 'total_confidence': tup[1], 'boolean_area': tup[2],
                 'boolean_x_center': tup[3], 'boolean_y_center': tup[4]}
     
-    def rescale(dict_, image_raw_shape):
+    def rescale(self, dict_, image_raw_shape):
         dict_2 = dict_.copy()
         dict_2['bottom_y'] = np.round(dict_['bottom_y']/ 240.0 * image_raw_shape[0])
         dict_2['top_y'] = np.round(dict_['top_y']/ 240.0 * image_raw_shape[0])
