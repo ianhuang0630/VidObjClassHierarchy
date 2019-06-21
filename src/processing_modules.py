@@ -245,7 +245,8 @@ class HandDetector(object):
                     margin_top_y = max(top_y - self.margin[0], 0)
                     margin_right_x= min(right_x + self.margin[1], mask.shape[1]-1)
                     margin_left_x = max(left_x - self.margin[1], 0)
-                     
+                    assert margin_right_x >= margin_left_x
+
                     # calculating overall confidence 
                     total_confidence = sum([confidence[element[0], element[1]] for element in set_])
                     area = len(set_)
@@ -291,7 +292,7 @@ class HandDetector(object):
         return hands
 
     def format_bounding_box(self, tup):
-        return {'bottom_y': tup[0][0], 'top_y': tup[0][1], 'left_x': tup[0][2], 'right_x': tup[0][3],
+        return {'bottom_y': tup[0][0], 'top_y': tup[0][1], 'right_x': tup[0][2], 'left_x': tup[0][3],
                 'total_confidence': tup[1], 'boolean_area': tup[2],
                 'boolean_x_center': tup[3], 'boolean_y_center': tup[4]}
     
@@ -307,16 +308,34 @@ class HandDetector(object):
 class HandMeshPredictor(object):
     def __init__(self, 
             resume_checkpoint='utilities/obman_train/release_models/obman/checkpoint.pth.tar',
+            mano_root='utilities/obman_train/misc/mano',
             no_beta=True):
         self.resume = resume_checkpoint
         self.checkpoint = os.path.dirname(self.resume)
-        with open(os.path.join(checkpoint, 'opt.pkl'), 'rb') as opt_f:
+        with open(os.path.join(self.checkpoint, 'opt.pkl'), 'rb') as opt_f:
             self.opts = pickle.load(opt_f)
         self.no_beta = no_beta 
-        self.model = reload_model(self.resume, self.opts, self.no_beta)
+        self.mano_root = mano_root
+        self.model = reload_model(self.resume, self.opts, 
+                mano_root=self.mano_root, no_beta=self.no_beta)
         self.model.eval()
         # model should be loaded now
-        
+    
+
+    def forward_pass_3d(self, model, input_image, pred_obj=True):
+        sample = {}
+        sample[TransQueries.images] = input_image
+        sample[BaseQueries.sides] = ["left"]
+        sample[TransQueries.joints3d] = input_image.new_ones((1, 21, 3)).float()
+        sample["root"] = "wrist"
+        if pred_obj:
+            sample[TransQueries.objpoints3d] = input_image.new_ones(
+                (1, 600, 3)
+            ).float()
+        _, results, _ = model.forward(sample, no_loss=True)
+
+        return results
+
     def process (self, image_list):
         """
         Args:
@@ -332,30 +351,23 @@ class HandMeshPredictor(object):
                 if which_hand in hand_info:
                     image_raw = cv2.imread(image_name)
                     # cropping the hand
-                    crop = image_raw[hand_info['left']['top_y']:hand_info['left']['bottom_y']+1, 
-                                hand_info['left']['left_x']:hand_info['left']['right_x']+1, :]
+                    crop = image_raw[int(hand_info[which_hand]['top_y']):int(hand_info[which_hand]['bottom_y'])+1, 
+                                int(hand_info[which_hand]['left_x']):int(hand_info[which_hand]['right_x'])+1, :]
                     frame= preprocess_frame(crop)
                     img = Image.fromarray(frame.copy())
                     hand_crop = cv2.resize(np.array(img), (256, 256)) 
                     
                     if which_hand == 'left':
                         hand_image = prepare_input(hand_crop, flip_left_right=False)
-                    
-                    if which_hand == 'right':
-                        flip_hand_image = prepare_input(hand_crop, flip_left_right=True)
+                    elif which_hand == 'right':
+                        hand_image= prepare_input(hand_crop, flip_left_right=True)
 
-                    noflip_output = forward_pass_3d(model, noflip_hand_image)
-                    flip_output = forward_pass_3d(model, flip_hand_image)
-                    
-                    import ipdb; ipdb.set_trace() 
-                    flip_verts = flip_output["verts"].cpu().detach().numpy()[0]
-                    noflip_verts = noflip_output["verts"].cpu().detach().numpy()[0] 
+                    output = self.forward_pass_3d(self.model, hand_image)
+                    flip_verts = output["verts"].cpu().detach().numpy()[0]
                     
 
             # crop the image for the right hand (if applicable)
             # pass through the model
-            
-
             pass
 
 if __name__=='__main__':
@@ -370,3 +382,8 @@ if __name__=='__main__':
     HD = HandDetector(overwrite=True)
     hand_bounding_box_results = HD.process(input_)
     # more find grained hand mesh prediction
+    input_mesh = [(element['image_name'], element['hand']) for element in hand_bounding_box_results]
+
+    HMP = HandMeshPredictor()
+    HMP.process(input_mesh)
+
