@@ -385,7 +385,7 @@ class HandMeshPredictor(object):
                 # save into cache
                 with open(save_name, 'wb') as f:
                     pickle.dump(hand_mesh, f)
-                
+        return hand_mesh_list                
 
 if __name__=='__main__':
     # load the hand positions and estimate rough hand pose
