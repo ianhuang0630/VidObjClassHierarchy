@@ -28,13 +28,15 @@ class RegionProposer(object):
             show_mask_heatmaps=False,
             masks_per_dim=2,
             min_image_size=224,
-            cache_loc='cache/unknown_object_detection', image_extension='.jpg'
+            cache_loc='cache/unknown_object_detection', image_extension='.jpg',
             overwrite=False):
 
         self.cache_loc = cache_loc
+        if not os.path.exists(self.cache_loc): 
+            os.makedirs(self.cache_loc)
         self.extension_length = len(image_extension)
         self.overwrite = overwrite
-
+        
         self.cfg = cfg.clone()
         self.model = build_detection_model(cfg)
         self.model.eval()
@@ -97,7 +99,6 @@ class RegionProposer(object):
                 image, and the second item being a RGB matrix.
         """
         results = []
-        
         for image_name, image in image_list:
             save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl'
             if os.path.exists(save_name) and not self.overwrite:
@@ -303,5 +304,5 @@ if __name__=='__main__':
     
     RP= RegionProposer(cfg)
     image = cv2.imread('viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg')
-    bounding_boxes = RP.process(image) 
+    bounding_boxes = RP.process([('viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg', image)]) 
 
