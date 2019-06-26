@@ -9,32 +9,37 @@ import pickle
 
 # necessary tools for hand position estimation
 import matplotlib.pyplot as plt
+import cv2
 import sys
 sys.path.insert(0, 'utilities/maskrcnn-benchmark/demo')
 
 # necessary for maskrcnn
 from maskrcnn_benchmark.config import cfg
 
-from torchvision import import transforms as T
-from torchvision.transforms import import functional as F
-from maskrcnn_benchmark.modeling.detector import import build_detection_model
-from maskrcnn_benchmark.utils.checkpoint import import DetectronCheckpointer
-from maskrcnn_benchmark.structures.image_list import import to_image_list
+from torchvision import transforms as T
+from torchvision.transforms import functional as F
+from maskrcnn_benchmark.modeling.detector import build_detection_model
+from maskrcnn_benchmark.utils.checkpoint import DetectronCheckpointer
+from maskrcnn_benchmark.structures.image_list import to_image_list
 from maskrcnn_benchmark.modeling.roi_heads.mask_head.inference import Masker
-from maskrcnn_benchmark import import layers as L
-from maskrcnn_benchmark.utils import import cv2_util
-
+from maskrcnn_benchmark import layers as L
+from maskrcnn_benchmark.utils import cv2_util
+from predictor import Resize
 
 class RegionProposer(object):
-    def __init__(self, cfg):
+    def __init__(self, cfg,
+            confidence_threshold=0.7,
+            show_mask_heatmaps=False,
+            masks_per_dim=2,
+            min_image_size=224,):
         self.cfg = cfg.clone()
         self.model = build_detection_model(cfg)
         self.model.eval()
-        self.device = torch.device(cfg.MODEL>DEVICE)
+        self.device = torch.device(cfg.MODEL.DEVICE)
         self.model.to(self.device)
         self.min_image_size = min_image_size
    
-	save_dir = cfg.OUTPUT_DIR
+        save_dir = cfg.OUTPUT_DIR
         checkpointer = DetectronCheckpointer(cfg, self.model, save_dir=save_dir)
         _ = checkpointer.load(cfg.MODEL.WEIGHT)
 
@@ -106,7 +111,43 @@ class RegionProposer(object):
         result = self.overlay_class_names(result, top_predictions)
 
         return result 
-    
+   
+    def compute_prediction(self, original_image):
+        """
+        Arguments:
+            original_image (np.ndarray): an image as returned by OpenCV
+        Returns:
+            prediction (BoxList): the detected objects. Additional information
+                of the detection properties can be found in the fields of
+                the BoxList via `prediction.fields()`
+        """
+        # apply pre-processing to image
+        image = self.transforms(original_image)
+        # convert to an ImageList, padded so that it is divisible by
+        # cfg.DATALOADER.SIZE_DIVISIBILITY
+        image_list = to_image_list(image, self.cfg.DATALOADER.SIZE_DIVISIBILITY)
+        image_list = image_list.to(self.device)
+        # compute predictions
+        with torch.no_grad():
+            predictions = self.model(image_list)
+        predictions = [o.to(self.cpu_device) for o in predictions]
+
+        # always single image is passed at a time
+        prediction = predictions[0]
+
+        # reshape prediction (a BoxList) into the original image size
+        height, width = original_image.shape[:-1]
+        prediction = prediction.resize((width, height))
+
+        if prediction.has_field("mask"):
+            # if we have masks, paste the masks in the right position
+            # in the image, as defined by the bounding boxes
+            masks = prediction.get_field("mask")
+            # always single image is passed at a time
+            masks = self.masker([masks], [prediction])[0]
+            prediction.add_field("mask", masks)
+        return prediction
+
     def select_top_predictions(self, predictions):
         """
         Select only predictions which have a `score` > self.confidence_threshold,
@@ -150,6 +191,7 @@ class RegionProposer(object):
         for box, color in zip(boxes, colors):
             box = box.to(torch.int64)
             top_left, bottom_right = box[:2].tolist(), box[2:].tolist()
+            import ipdb; ipdb.set_trace()
             image = cv2.rectangle(
                 image, tuple(top_left), tuple(bottom_right), tuple(color), 1
             )
@@ -250,11 +292,11 @@ class RegionProposer(object):
         return image
 
 if __name__=='__main__':
-    config_file = 'utilities/maskrcnn-benchmark/configs/e2e_mask_rcnn_R_50_FPN_1x_caffe2.yaml'
+    config_file = 'utilities/maskrcnn-benchmark/configs/caffe2/e2e_mask_rcnn_R_50_FPN_1x_caffe2.yaml'
     cfg.merge_from_file(config_file)
     cfg.merge_from_list(['MODEL.DEVICE', 'cpu'])
 
-    coco_demo = RegionProposer()
+    coco_demo = RegionProposer(cfg)
     image = cv2.imread('viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg')
     coco_demo.run_on_opencv_image(image) 
 
