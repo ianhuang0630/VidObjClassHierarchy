@@ -96,21 +96,21 @@ class RegionProposer(object):
                 of the detection properties can be found in the fields of
                 the BoxList via `prediction.fields()`
         """
-        import ipdb; ipdb.set_trace()
         predictions = self.compute_prediction(image)
         top_predictions = self.select_top_predictions(predictions)
+        return top_predictions.bbox
+        
+        # result = image.copy()
+        # if self.show_mask_heatmaps:
+        #     return self.create_mask_montage(result, top_predictions)
+        # result = self.overlay_boxes(result, top_predictions)
+        # if self.cfg.MODEL.MASK_ON:
+        #     result = self.overlay_mask(result, top_predictions)
+        # if self.cfg.MODEL.KEYPOINT_ON:
+        #     result = self.overlay_keypoints(result, top_predictions)
+        # result = self.overlay_class_names(result, top_predictions)
 
-        result = image.copy()
-        if self.show_mask_heatmaps:
-            return self.create_mask_montage(result, top_predictions)
-        result = self.overlay_boxes(result, top_predictions)
-        if self.cfg.MODEL.MASK_ON:
-            result = self.overlay_mask(result, top_predictions)
-        if self.cfg.MODEL.KEYPOINT_ON:
-            result = self.overlay_keypoints(result, top_predictions)
-        result = self.overlay_class_names(result, top_predictions)
-
-        return result 
+        # return result 
    
     def compute_prediction(self, original_image):
         """
@@ -191,7 +191,6 @@ class RegionProposer(object):
         for box, color in zip(boxes, colors):
             box = box.to(torch.int64)
             top_left, bottom_right = box[:2].tolist(), box[2:].tolist()
-            import ipdb; ipdb.set_trace()
             image = cv2.rectangle(
                 image, tuple(top_left), tuple(bottom_right), tuple(color), 1
             )
@@ -294,9 +293,10 @@ class RegionProposer(object):
 if __name__=='__main__':
     config_file = 'utilities/maskrcnn-benchmark/configs/caffe2/e2e_mask_rcnn_R_50_FPN_1x_caffe2.yaml'
     cfg.merge_from_file(config_file)
-    cfg.merge_from_list(['MODEL.DEVICE', 'cpu'])
+    #cfg.merge_from_list(['MODEL.DEVICE', 'cpu'])
+    cfg.merge_from_list(['MODEL.DEVICE', 'gpu'])
 
     coco_demo = RegionProposer(cfg)
     image = cv2.imread('viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg')
-    coco_demo.run_on_opencv_image(image) 
+    bounding_boxes = coco_demo.run_on_opencv_image(image) 
 
