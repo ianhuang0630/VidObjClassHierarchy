@@ -87,7 +87,7 @@ class RegionProposer(object):
         )
         return transform 
     
-    def run_on_opencv_image(self, image):
+    def process(self, image):
         """
         Arguments:
             image (np.ndarray): an image as returned by OpenCV
@@ -294,9 +294,9 @@ if __name__=='__main__':
     config_file = 'utilities/maskrcnn-benchmark/configs/caffe2/e2e_mask_rcnn_R_50_FPN_1x_caffe2.yaml'
     cfg.merge_from_file(config_file)
     #cfg.merge_from_list(['MODEL.DEVICE', 'cpu'])
-    cfg.merge_from_list(['MODEL.DEVICE', 'gpu'])
-
-    coco_demo = RegionProposer(cfg)
+    cfg.merge_from_list(['MODEL.DEVICE', 'cuda'])
+    
+    RP= RegionProposer(cfg)
     image = cv2.imread('viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg')
-    bounding_boxes = coco_demo.run_on_opencv_image(image) 
+    bounding_boxes = RP.process(image) 
 
