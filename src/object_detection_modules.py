@@ -1,10 +1,6 @@
 import os
 import torch
-import tensorflow as tf
 import numpy as np
-import scipy as sp
-from scipy.misc import imread, imresize
-import json
 import pickle
 
 # necessary tools for hand position estimation
@@ -31,7 +27,14 @@ class RegionProposer(object):
             confidence_threshold=0.7,
             show_mask_heatmaps=False,
             masks_per_dim=2,
-            min_image_size=224,):
+            min_image_size=224,
+            cache_loc='cache/unknown_object_detection', image_extension='.jpg'
+            overwrite=False):
+
+        self.cache_loc = cache_loc
+        self.extension_length = len(image_extension)
+        self.overwrite = overwrite
+
         self.cfg = cfg.clone()
         self.model = build_detection_model(cfg)
         self.model.eval()
@@ -87,30 +90,31 @@ class RegionProposer(object):
         )
         return transform 
     
-    def process(self, image):
+    def process(self, image_list ):
         """
-        Arguments:
-            image (np.ndarray): an image as returned by OpenCV
-        Returns:
-            prediction (BoxList): the detected objects. Additional information
-                of the detection properties can be found in the fields of
-                the BoxList via `prediction.fields()`
+        Args:
+            image_list: list of tuples, first item being the name/paht of the
+                image, and the second item being a RGB matrix.
         """
-        predictions = self.compute_prediction(image)
-        top_predictions = self.select_top_predictions(predictions)
-        return top_predictions.bbox
+        results = []
         
-        # result = image.copy()
-        # if self.show_mask_heatmaps:
-        #     return self.create_mask_montage(result, top_predictions)
-        # result = self.overlay_boxes(result, top_predictions)
-        # if self.cfg.MODEL.MASK_ON:
-        #     result = self.overlay_mask(result, top_predictions)
-        # if self.cfg.MODEL.KEYPOINT_ON:
-        #     result = self.overlay_keypoints(result, top_predictions)
-        # result = self.overlay_class_names(result, top_predictions)
+        for image_name, image in image_list:
+            save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl'
+            if os.path.exists(save_name) and not self.overwrite:
+                with open(save_name, 'rb') as f:
+                    results.append(pickle.load(f))
+            else:
+                predictions = self.compute_prediction(image)
+                top_predictions = self.select_top_predictions(predictions)
+                
+                image_result = {'image_name': image_name,
+                                'bounding_boxes': top_predictions.bbox}
 
-        # return result 
+                with open(save_name, 'wb') as f:
+                    pickle.dump(image_result, f)
+                results.append(image_result)
+                  
+        return results
    
     def compute_prediction(self, original_image):
         """
@@ -146,6 +150,7 @@ class RegionProposer(object):
             # always single image is passed at a time
             masks = self.masker([masks], [prediction])[0]
             prediction.add_field("mask", masks)
+        
         return prediction
 
     def select_top_predictions(self, predictions):
