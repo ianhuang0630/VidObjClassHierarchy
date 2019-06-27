@@ -11,7 +11,7 @@ from scipy.misc import imread
 import cv2
 import pandas as pd
 
-from src import object_detection_modules, processing_modules
+from . import object_detection_modules, processing_modules
 import sys
 sys.path.insert(0, 'utilities/maskrcnn-benchmark/demo')
 # necessary for maskrcnn
