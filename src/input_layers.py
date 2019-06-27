@@ -11,15 +11,16 @@ from scipy.misc import imread
 import cv2
 import pandas as pd
 
-from . import object_detection_modules, processing_modules
 import sys
+sys.path.insert(0, './')
 sys.path.insert(0, 'utilities/maskrcnn-benchmark/demo')
 # necessary for maskrcnn
+import object_detection_modules, processing_modules
 from maskrcnn_benchmark.config import cfg
 
 
 class InputLayer(object):
-    def __init__(self, cache_loc='cache/', overwrite=False):
+    def __init__(self, cache_loc='cache/', overwrite=False, max_num_boxes=4):
         self.cache_loc = cache_loc
         if not os.path.exists(self.cache_loc):
             os.makedirs(self.cache_loc)
@@ -36,6 +37,43 @@ class InputLayer(object):
         #cfg.merge_from_list(['MODEL.DEVICE', 'cpu'])
         cfg.merge_from_list(['MODEL.DEVICE', 'cuda'])
         self.RP = object_detection_modules.RegionProposer(cfg)         
+        
+        self.max_num_boxes = max_num_boxes
+    
+    def filter_obj_bboxes(self, bboxes, hand_locations):
+        # simply naively calculating the distance to the hand
+        assert len(hand_locations) != 0, 'No hands present in this image' 
+        rank_batch = []
+        for bbox in bboxes:
+            bbox_center = (bbox[:2] + bbox[2:])/2.0 
+            # calculate the min distance to either hand
+            bbox_center = (bbox[2:] + bbox[2:])
+            options = []
+            if 'left' in hand_locations:
+
+                hand_center = np.array([
+                    np.mean([hand_locations['left']['left_x'], hand_locations['left']['right_x']]),
+                    np.mean([hand_locations['left']['top_y'], hand_locations['left']['bottom_y']])
+                    ])
+
+                sqr_distance= np.dot(hand_center - bbox_center, hand_center - bbox_center)
+                options.append(sqr_distance)
+
+            if 'right' in hand_locations:
+                hand_center = np.array([
+                    np.mean([hand_locations['right']['left_x'], hand_locations['right']['right_x']]),
+                    np.mean([hand_locations['right']['top_y'], hand_locations['right']['bottom_y']])
+                    ])
+
+                sqr_distance= np.dot(hand_center - bbox_center, hand_center - bbox_center) 
+                options.append(sqr_distance)
+            
+            rank_batch.append([bbox, min(options)]) 
+        
+        rank_batch_sorted = sorted(rank_batch, key=lambda x: x[1])
+        filtered_bboxes = rank_batch_sorted[:min(self.max_num_boxes, len(rank_batch_sorted))]
+        
+        return [ element[0] for element in filtered_bboxes ]
 
     def get_feature_layer(self, image_locs):
         for image_loc in image_locs:
@@ -51,15 +89,16 @@ class InputLayer(object):
                         for element in pose_estimate]  
         hand_bounding_boxes = self.HD.process(binary_masks) 
         
-        input_mesh = [(element['image_name'], element['hand']) for element in hand_bounding_box_results] 
+        input_mesh = [(element['image_name'], element['hand']) for element in hand_bounding_boxes] 
         mesh_joints = self.HMP.process(input_mesh)
         
         # get hand bounding  
         images_cv = [[image_loc, cv2.imread(image_loc)] for image_loc in image_locs]
         obj_bounding_boxes = self.RP.process(images_cv)
-
+        
+        results = []
         # organization of the information
-        for idx, image_loc in image_locs:
+        for idx, image_loc in enumerate(image_locs):
             # first, hand location 
             if 'left' in hand_bounding_boxes[idx]['hand']:
                 # bottom left, top right
@@ -67,7 +106,7 @@ class InputLayer(object):
                                     hand_bounding_boxes[idx]['hand']['left']['bottom_y'],
                                     hand_bounding_boxes[idx]['hand']['left']['right_x'],
                                     hand_bounding_boxes[idx]['hand']['left']['top_y']])
-                left_pose = mesh_joints['left']['joints'].flatten()
+                left_pose = mesh_joints[idx]['left']['joints'].flatten()
             else:
                 # 0000
                 left_bbox = np.zeros(4)
@@ -79,19 +118,28 @@ class InputLayer(object):
                                     hand_bounding_boxes[idx]['hand']['right']['bottom_y'],
                                     hand_bounding_boxes[idx]['hand']['right']['right_x'],
                                     hand_bounding_boxes[idx]['hand']['right']['top_y']])
-                right_pose = mesh_joints['right']['joints'].flatten()
+                right_pose = mesh_joints[idx]['right']['joints'].flatten()
 
             else:
                 # 0000   
                 right_bbox = np.zeros(4) 
                 right_pose = np.zeros(21, 3).flatten() 
             
-            import ipdb; ipdb.set_trace() 
-              
-            # then object bounding box
+            # then object bounding box -- find the ones that are the closest
+            object_bounding_boxes = np.zeros(self.max_num_boxes * 4) # intializing 
+            if len(hand_bounding_boxes[idx]['hand']) != 0:
+                selected_obj_boxes = self.filter_obj_bboxes(obj_bounding_boxes[idx]['bounding_boxes'].numpy(), 
+                                                            hand_bounding_boxes[idx]['hand'])
+                concat = np.concatenate(selected_obj_boxes)
+                object_bounding_boxes[:len(concat)] = concat
+            
+            # left box, right box, left joints, right joints, object_bounding_box
+            results.append(np.concatenate([left_bbox, right_bbox, left_pose, right_pose, object_bounding_boxes]))
 
+        return results 
+                
 if __name__=='__main__':
     
     IL = InputLayer() 
-
-    pass
+    images = ['viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg']
+    IL.get_feature_layer(images)

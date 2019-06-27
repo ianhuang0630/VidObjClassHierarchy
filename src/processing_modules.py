@@ -355,7 +355,7 @@ class HandMeshPredictor(object):
         for image_name, hand_info in image_list:
             save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl'  
             if os.path.exists(save_name) and not self.overwrite:
-                with open(save_naem, 'rb')  as f :
+                with open(save_name, 'rb')  as f :
                     hand_mesh_list.append(pickle.load(f))   
             else:
                 hand_mesh = {}
