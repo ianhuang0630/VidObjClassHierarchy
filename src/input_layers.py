@@ -11,10 +11,9 @@ from scipy.misc import imread
 import cv2
 import pandas as pd
 
+from . import object_detection_modules, processing_modules
 import sys
 sys.path.insert(0, 'utilities/maskrcnn-benchmark/demo')
-sys.path.insert(0, '.')
-from src import object_detection_modules, processing_modules
 # necessary for maskrcnn
 from maskrcnn_benchmark.config import cfg
 
@@ -52,7 +51,7 @@ class InputLayer(object):
                         for element in pose_estimate]  
         hand_bounding_boxes = self.HD.process(binary_masks) 
         
-        input_mesh = [(element['image_name'], element['hand']) for element in hand_bounding_boxes] 
+        input_mesh = [(element['image_name'], element['hand']) for element in hand_bounding_box_results] 
         mesh_joints = self.HMP.process(input_mesh)
         
         # get hand bounding  
@@ -94,4 +93,5 @@ class InputLayer(object):
 if __name__=='__main__':
     
     IL = InputLayer() 
-    IL.get_feature_layer(['viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg'])
+
+    pass
