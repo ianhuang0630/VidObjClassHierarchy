@@ -59,7 +59,36 @@ class InputLayer(object):
         obj_bounding_boxes = RP.process(images_cv)
 
         # organization of the information
-        import ipdb; ipdb.set_trace()
+        for idx, image_loc in image_locs:
+            # first, hand location 
+            if 'left' in hand_bounding_boxes[idx]['hand']:
+                # bottom left, top right
+                left_bbox = np.array([hand_bounding_boxes[idx]['hand']['left']['left_x'],
+                                    hand_bounding_boxes[idx]['hand']['left']['bottom_y'],
+                                    hand_bounding_boxes[idx]['hand']['left']['right_x'],
+                                    hand_bounding_boxes[idx]['hand']['left']['top_y']])
+                left_pose = mesh_joints['left']['joints'].flatten()
+            else:
+                # 0000
+                left_bbox = np.zeros(4)
+                left_pose = np.zeros(21, 3).flatten()
+
+            if 'right' in hand_bounding_boxes[idx]['hand']:
+                # bottom left, top right
+                right_bbox = np.array([hand_bounding_boxes[idx]['hand']['right']['left_x'],
+                                    hand_bounding_boxes[idx]['hand']['right']['bottom_y'],
+                                    hand_bounding_boxes[idx]['hand']['right']['right_x'],
+                                    hand_bounding_boxes[idx]['hand']['right']['top_y']])
+                right_pose = mesh_joints['right']['joints'].flatten()
+
+            else:
+                # 0000   
+                right_bbox = np.zeros(4) 
+                right_pose = np.zeros(21, 3).flatten() 
+            
+            import ipdb; ipdb.set_trace() 
+              
+            # then object bounding box
 
 if __name__=='__main__':
     
