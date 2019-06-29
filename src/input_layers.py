@@ -14,7 +14,7 @@ import pandas as pd
 import sys
 sys.path.insert(0, './')
 sys.path.insert(0, 'utilities/maskrcnn-benchmark/demo')
-sys.setrecursionlimit(3000) # same as ipython
+sys.setrecursionlimit(1000) # same as ipython
 # necessary for maskrcnn
 import object_detection_modules, processing_modules
 from maskrcnn_benchmark.config import cfg
