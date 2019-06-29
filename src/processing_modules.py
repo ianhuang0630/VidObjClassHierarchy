@@ -6,9 +6,9 @@ import scipy as sp
 from scipy.misc import imread, imresize
 import json
 import pickle
-
+from tqdm import tqdm
 # necessary tools for hand position estimation
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import sys
 sys.path.insert(0, 'utilities/hand3d/')
 
@@ -76,8 +76,8 @@ class HandPositionEstimator(object):
                 image, and the second item being a RGB matrix.
         """
         results = []
-
-        for image_name, image_raw in image_list:
+        print('Extracting masks...')
+        for image_name, image_raw in tqdm(image_list):
             save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl'
             if os.path.exists(save_name) and not self.overwrite:
                 # loading directly from cache
@@ -121,27 +121,27 @@ class HandPositionEstimator(object):
                     pickle.dump(image_result, f)
 
                 results.append(image_result)
-                if self.visualize:
-                    # visualize
-                    fig = plt.figure(1, figsize=(10,10))
-                    ax1 = fig.add_subplot(221)
-                    ax2 = fig.add_subplot(222)
-                    ax3 = fig.add_subplot(223)
-                    ax4 = fig.add_subplot(224, projection='3d')
-                    ax1.imshow(image_raw)
-                    plot_hand(coord_hw, ax1)
-                    ax2.imshow(image_crop_v)
-                    plot_hand(coord_hw_crop, ax2)
-                    ax3.imshow(np.argmax(hand_scoremap_v, 2))
-                    plot_hand_3d(keypoint_coord3d_v, ax4)
-                    ax4.view_init(azim=-90.0, elev=-90.0)  # aligns the 3d coord with the camera view
-                    ax4.set_xlim([-3, 3])
-                    ax4.set_ylim([-3, 1])
-                    ax4.set_zlim([-3, 3])
-                    
-                    image_save_name = os.path.join(self.visualize_save_loc, 
-                            os.path.basename(image_name))
-                    plt.savefig(image_save_name)
+                # if self.visualize:
+                #     # visualize
+                #     fig = plt.figure(1, figsize=(10,10))
+                #     ax1 = fig.add_subplot(221)
+                #     ax2 = fig.add_subplot(222)
+                #     ax3 = fig.add_subplot(223)
+                #     ax4 = fig.add_subplot(224, projection='3d')
+                #     ax1.imshow(image_raw)
+                #     plot_hand(coord_hw, ax1)
+                #     ax2.imshow(image_crop_v)
+                #     plot_hand(coord_hw_crop, ax2)
+                #     ax3.imshow(np.argmax(hand_scoremap_v, 2))
+                #     plot_hand_3d(keypoint_coord3d_v, ax4)
+                #     ax4.view_init(azim=-90.0, elev=-90.0)  # aligns the 3d coord with the camera view
+                #     ax4.set_xlim([-3, 3])
+                #     ax4.set_ylim([-3, 1])
+                #     ax4.set_zlim([-3, 3])
+                #     
+                #     image_save_name = os.path.join(self.visualize_save_loc, 
+                #             os.path.basename(image_name))
+                #     plt.savefig(image_save_name)
         return results
 
 class HandPositionEstimator2(object):
@@ -183,7 +183,9 @@ class HandDetector(object):
         
         assert len(position) ==2, 'only two coordinates allowed.'
         this_island = []
-        if mask[position[0], position[1]] and not self.visited[position[0], position[1]]:
+        if not mask[position[0], position[1]]:
+            self.visited[position[0], position[1]] = 1
+        elif mask[position[0], position[1]] and not self.visited[position[0], position[1]]:
             self.visited[position[0], position[1]] = 1 # we've now visited this 
             this_island.append(position)
             # now we look at the neighbors
@@ -205,7 +207,8 @@ class HandDetector(object):
         """
         hands = [] 
         # finding the two largest contiguous area
-        for mask_tuple in masks:
+        print('extracting bounding boxes')
+        for mask_tuple in tqdm(masks):
             image_name = mask_tuple[0]
             mask = mask_tuple[1]
 
@@ -273,7 +276,8 @@ class HandDetector(object):
                     hand = {'left': self.rescale(self.format_bounding_box(left_to_right[0]), image_raw_shape),
                             'right': self.rescale(self.format_bounding_box(left_to_right[1]), image_raw_shape)}
                 elif len(sorted_bounding_boxes) == 1:
-                    if sorted_bounding_boxes[0][3] >= (mask.shape[2]-1)/2.0: # if the midpoint is more than halfway
+                    assert len(sorted_bounding_boxes[0]) ==5, 'image: {} , {}'.format(image_name, sorted_bounding_boxes)
+                    if sorted_bounding_boxes[0][3] >= (mask.shape[1]-1)/2.0: # if the midpoint is more than halfway
                         hand = {'right': self.rescale(self.format_bounding_box(sorted_bounding_boxes[0]), image_raw_shape)}
                     else:
                         hand = {'left': self.rescale(self.format_bounding_box(sorted_bounding_boxes[0]), image_raw_shape)}
@@ -352,7 +356,8 @@ class HandMeshPredictor(object):
                 as well as other information
         """
         hand_mesh_list = []
-        for image_name, hand_info in image_list:
+        print('Extracting hand pose and hand mesh...')
+        for image_name, hand_info in tqdm(image_list):
             save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl'  
             if os.path.exists(save_name) and not self.overwrite:
                 with open(save_name, 'rb')  as f :

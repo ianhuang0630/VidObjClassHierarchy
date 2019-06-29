@@ -4,7 +4,7 @@ import numpy as np
 import pickle
 
 # necessary tools for hand position estimation
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import cv2
 import sys
 sys.path.insert(0, 'utilities/maskrcnn-benchmark/demo')

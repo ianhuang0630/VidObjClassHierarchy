@@ -14,6 +14,7 @@ import pandas as pd
 import sys
 sys.path.insert(0, './')
 sys.path.insert(0, 'utilities/maskrcnn-benchmark/demo')
+sys.setrecursionlimit(3000) # same as ipython
 # necessary for maskrcnn
 import object_detection_modules, processing_modules
 from maskrcnn_benchmark.config import cfg
@@ -72,7 +73,7 @@ class InputLayer(object):
         
         rank_batch_sorted = sorted(rank_batch, key=lambda x: x[1])
         filtered_bboxes = rank_batch_sorted[:min(self.max_num_boxes, len(rank_batch_sorted))]
-        
+        assert len(filtered_bboxes)>0
         return [ element[0] for element in filtered_bboxes ]
 
     def get_feature_layer(self, image_locs):
@@ -110,7 +111,7 @@ class InputLayer(object):
             else:
                 # 0000
                 left_bbox = np.zeros(4)
-                left_pose = np.zeros(21, 3).flatten()
+                left_pose = np.zeros((21, 3)).flatten()
 
             if 'right' in hand_bounding_boxes[idx]['hand']:
                 # bottom left, top right
@@ -123,11 +124,12 @@ class InputLayer(object):
             else:
                 # 0000   
                 right_bbox = np.zeros(4) 
-                right_pose = np.zeros(21, 3).flatten() 
+                right_pose = np.zeros((21, 3)).flatten() 
             
             # then object bounding box -- find the ones that are the closest
             object_bounding_boxes = np.zeros(self.max_num_boxes * 4) # intializing 
-            if len(hand_bounding_boxes[idx]['hand']) != 0:
+            if len(hand_bounding_boxes[idx]['hand']) != 0 \
+                    and len(obj_bounding_boxes[idx]['bounding_boxes'].numpy())!=0:
                 selected_obj_boxes = self.filter_obj_bboxes(obj_bounding_boxes[idx]['bounding_boxes'].numpy(), 
                                                             hand_bounding_boxes[idx]['hand'])
                 concat = np.concatenate(selected_obj_boxes)
@@ -140,6 +142,29 @@ class InputLayer(object):
                 
 if __name__=='__main__':
     
+    dataset_path = '/vision/group/EPIC-KITCHENS/'
+    visual_dataset_path = os.path.join(dataset_path, 'EPIC_KITCHENS_2018.Bingbin')
+    visual_images_foldername = 'object_detection_images'
+    visual_images_folderpath = os.path.join(visual_dataset_path, visual_images_foldername)
+   
+    images = []
+    for element in os.listdir(os.path.join(visual_images_folderpath, 'train')):
+        lower_path = os.path.join(os.path.join(visual_images_folderpath, 'train'), element)
+        if os.path.isdir(lower_path):
+            for element2 in os.listdir(lower_path):
+                lowerer_path = os.path.join(lower_path, element2)
+                if os.path.isdir(lowerer_path): 
+                    for element3 in os.listdir(lowerer_path):
+                        lowererer_path = os.path.join(lowerer_path, element3)
+                        images.append(lowererer_path)
     IL = InputLayer() 
-    images = ['viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg']
-    IL.get_feature_layer(images)
+        
+    counter = 0
+    batch_size = 10 
+    
+    while counter < len(images):
+        print('processing batch #{}'.format(counter+1))
+        IL.get_feature_layer(images[counter:min(counter+batch_size, len(images))])
+        print('done')
+        counter += batch_size
+         
