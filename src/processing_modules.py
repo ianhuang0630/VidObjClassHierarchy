@@ -173,6 +173,8 @@ class HandDetector(object):
             os.makedirs(self.cache_loc, exist_ok=True)
         self.overwrite = overwrite 
         self.extension_length = len(image_extension) 
+        self.recursion_depth = 0
+        self.max_recursion_depth = sys.getrecursionlimit()
 
     def find_contiguous_areas(self, mask, position):
         """
@@ -180,7 +182,10 @@ class HandDetector(object):
             mask: boolean np array
             position: list of indices
         """
-        
+        # TODO: keep track of number of layers
+        self.recursion_depth += 1
+        followup = None
+
         assert len(position) ==2, 'only two coordinates allowed.'
         this_island = []
         if not mask[position[0], position[1]]:
@@ -191,11 +196,16 @@ class HandDetector(object):
             # now we look at the neighbors
             for i in range(max(0, position[0]-1), min(mask.shape[0]-1, position[0]+1)+1):
                 for j in range(max(0, position[1]-1), min(mask.shape[1]-1, position[1]+1)+1):
-                    if i != position[0] and j != position[1]:
-                        neighbor_islands = self.find_contiguous_areas(mask, [i,j])
+                    if i != position[0] and j != position[1] and self.recursion_depth < self.max_recursion_depth:
+                        neighbor_islands, followup = self.find_contiguous_areas(mask, [i,j])
                         this_island.extend(neighbor_islands)
-
-        return this_island 
+                    elif self.recursion_depth == self.max_recursion_depth:
+                        # return this current position as a follow-up later on,
+                        followup = [position[0], position[1]]
+                        self.visited[position[0], position[1]] = 0 # set as unvisited so that followup is valid
+                        # stop iterating and return this_island as is.
+                        return this_island, followup
+        return this_island, followup 
 
     def process(self, masks):
         """
@@ -227,7 +237,17 @@ class HandDetector(object):
                 for i in range(mask.shape[0]):
                     for j in range(mask.shape[1]):
                         if not self.visited[i,j]:
-                            contiguous_set = self.find_contiguous_areas(mask, [i,j])
+                            contiguous_set, followup = self.find_contiguous_areas(mask, [i,j])
+                            followup_sets = []
+                            self.recursion_depth = 0
+                            while followup is not None:
+                                followup_set, followup = self.find_contiguous_areas(mask, followup) 
+                                self.recursion_depth = 0
+                                followup_sets.append(followup_set)
+                            followup_sets.append(followup_sets)
+                            
+                            contiguous_set = list(set.union([set(element) for element in followup_sets].append(set(continguous_set))))
+                            # resetting recursion_depth
                             if len(contiguous_set) > 0:
                                 contiguous_sets.append(contiguous_set)
                 
