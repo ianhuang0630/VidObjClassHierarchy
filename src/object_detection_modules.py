@@ -100,7 +100,9 @@ class RegionProposer(object):
         """
         results = []
         for image_name, image in image_list:
-            save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl'
+            save_name = os.path.join(self.cache_loc,
+                    ('#'.join(image_name.split('/')[-3:])[:-self.extension_length])+'.pkl')
+            
             if os.path.exists(save_name) and not self.overwrite:
                 with open(save_name, 'rb') as f:
                     results.append(pickle.load(f))

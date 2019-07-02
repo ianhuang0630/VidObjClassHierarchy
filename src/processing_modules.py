@@ -78,7 +78,10 @@ class HandPositionEstimator(object):
         results = []
         print('Extracting masks...')
         for image_name, image_raw in tqdm(image_list):
-            save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl'
+            
+            save_name = os.path.join(self.cache_loc,
+                    ('#'.join(image_name.split('/')[-3:])[:-self.extension_length])+'.pkl')
+            
             if os.path.exists(save_name) and not self.overwrite:
                 # loading directly from cache
                 with open(save_name, 'rb') as f:
@@ -155,7 +158,7 @@ class HandPositionEstimator2(object):
 
 class HandDetector(object):
     def __init__(self, margin = [20, 20], orderby = 'total_confidence',
-                    area_threshold = 0, average_confidence_threshold = 0.0,
+                    area_threshold = 300, average_confidence_threshold = 0.0,
                     cache_loc='cache/hand_bounding_boxes', image_extension='.jpg',
                     overwrite=False):
         """
@@ -174,7 +177,7 @@ class HandDetector(object):
         self.overwrite = overwrite 
         self.extension_length = len(image_extension) 
         self.recursion_depth = 0
-        self.max_recursion_depth = sys.getrecursionlimit()
+        self.max_recursion_depth = 300 # sys.getrecursionlimit()
 
     def find_contiguous_areas(self, mask, position):
         """
@@ -196,16 +199,22 @@ class HandDetector(object):
             # now we look at the neighbors
             for i in range(max(0, position[0]-1), min(mask.shape[0]-1, position[0]+1)+1):
                 for j in range(max(0, position[1]-1), min(mask.shape[1]-1, position[1]+1)+1):
-                    if i != position[0] and j != position[1] and self.recursion_depth < self.max_recursion_depth:
+                    if [i,j] != list(position) and self.recursion_depth < self.max_recursion_depth:
                         neighbor_islands, followup = self.find_contiguous_areas(mask, (i,j))
                         this_island.extend(neighbor_islands)
-                    elif self.recursion_depth == self.max_recursion_depth:
+                        if followup is not None:
+                            self.recursion_depth -=1 
+                            return this_island, followup
+                    elif self.recursion_depth+1 == self.max_recursion_depth:
+                        # import ipdb; ipdb.set_trace()
                         # return this current position as a follow-up later on,
                         if followup is None:
                             followup = (position[0], position[1])
                         self.visited[followup[0], followup[1]] = 0 # set as unvisited so that followup is valid
                         # stop iterating and return this_island as is.
+                        self.recursion_depth -= 1
                         return this_island, followup
+        self.recursion_depth -= 1
         return this_island, followup 
 
     def process(self, masks):
@@ -226,7 +235,8 @@ class HandDetector(object):
             confidence = np.exp(mask_tuple[2][:,:,1])/ np.sum(np.exp(mask_tuple[2]),2)
             image_raw_shape = mask_tuple[3] 
             # save_name
-            save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl' 
+            save_name = os.path.join(self.cache_loc,
+                    ('#'.join(image_name.split('/')[-3:])[:-self.extension_length])+'.pkl')
             # check if file already exists
             if os.path.exists(save_name) and not self.overwrite:
                 with open(save_name, 'rb') as f:
@@ -237,10 +247,14 @@ class HandDetector(object):
                 contiguous_sets = [] 
                 for i in range(mask.shape[0]):
                     for j in range(mask.shape[1]):
+                        # if [i,j] == [80, 104]:
+                        #     import ipdb; ipdb.set_trace()
                         if not self.visited[i,j]:
                             contiguous_set, followup = self.find_contiguous_areas(mask, (i,j))
                             followup_sets = []
-                            self.recursion_depth = 0
+                            assert self.recursion_depth == 0, 'recursion depth after exiting: {}'.format(self.recursion_depth)
+                            #if followup is not None:
+                            #    import ipdb; ipdb.set_trace()
                             while followup is not None:
                                 followup_set, followup = self.find_contiguous_areas(mask, followup) 
                                 self.recursion_depth = 0
@@ -250,8 +264,9 @@ class HandDetector(object):
                                         set.union(*([set(element) for element in followup_sets]+[set(contiguous_set)])))
                             # resetting recursion_depth
                             if len(contiguous_set) > 0:
+                                # print('anchor pt: {}, {}'.format(i,j))
                                 contiguous_sets.append(contiguous_set)
-                
+                # import ipdb; ipdb.set_trace() 
                 bounding_boxes = []
 
                 for set_ in contiguous_sets:
@@ -379,7 +394,9 @@ class HandMeshPredictor(object):
         hand_mesh_list = []
         print('Extracting hand pose and hand mesh...')
         for image_name, hand_info in tqdm(image_list):
-            save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl'  
+            save_name = os.path.join(self.cache_loc,
+                    ('#'.join(image_name.split('/')[-3:])[:-self.extension_length])+'.pkl')
+            
             if os.path.exists(save_name) and not self.overwrite:
                 with open(save_name, 'rb')  as f :
                     hand_mesh_list.append(pickle.load(f))   
@@ -415,18 +432,18 @@ class HandMeshPredictor(object):
 
 if __name__=='__main__':
     # load the hand positions and estimate rough hand pose
-    HPE = HandPositionEstimator(overwrite=True)
-    test_images = [['viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg', 
-        imread('viz/viz_data/tmp_dataset/P01/P01_01/0000024871.jpg')] ] 
+    HPE = HandPositionEstimator(cache_loc='rm_me', overwrite=True)
+    test_images = [['/vision/group/EPIC-KITCHENS/EPIC_KITCHENS_2018.Bingbin/object_detection_images/train/P22/P22_12/0000004381.jpg', 
+        imread('/vision/group/EPIC-KITCHENS/EPIC_KITCHENS_2018.Bingbin/object_detection_images/train/P22/P22_12/0000004381.jpg')] ] 
     results = HPE.process(test_images)
     input_ = [(element['image_name'], element['binary_mask'], element['confidence'], 
         element['original_shape']) for element in results]
     # generate bounding boxes for each image
-    HD = HandDetector(overwrite=True)
+    HD = HandDetector(cache_loc='rm_me', overwrite=True)
     hand_bounding_box_results = HD.process(input_)
     # more find grained hand mesh prediction
     input_mesh = [(element['image_name'], element['hand']) for element in hand_bounding_box_results]
 
-    HMP = HandMeshPredictor()
+    HMP = HandMeshPredictor(cache_loc='rm_me', overwrite=True)
     HMP.process(input_mesh)
 
