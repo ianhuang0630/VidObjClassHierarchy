@@ -78,7 +78,10 @@ class HandPositionEstimator(object):
         results = []
         print('Extracting masks...')
         for image_name, image_raw in tqdm(image_list):
-            save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl'
+            
+            save_name = os.path.join(self.cache_loc,
+                    ('#'.join(image_name.split('/')[-3:])[:-self.extension_length])+'.pkl')
+            
             if os.path.exists(save_name) and not self.overwrite:
                 # loading directly from cache
                 with open(save_name, 'rb') as f:
@@ -226,7 +229,8 @@ class HandDetector(object):
             confidence = np.exp(mask_tuple[2][:,:,1])/ np.sum(np.exp(mask_tuple[2]),2)
             image_raw_shape = mask_tuple[3] 
             # save_name
-            save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl' 
+            save_name = os.path.join(self.cache_loc,
+                    ('#'.join(image_name.split('/')[-3:])[:-self.extension_length])+'.pkl')
             # check if file already exists
             if os.path.exists(save_name) and not self.overwrite:
                 with open(save_name, 'rb') as f:
@@ -379,7 +383,9 @@ class HandMeshPredictor(object):
         hand_mesh_list = []
         print('Extracting hand pose and hand mesh...')
         for image_name, hand_info in tqdm(image_list):
-            save_name = os.path.join(self.cache_loc, os.path.basename(image_name)[:-self.extension_length])+'.pkl'  
+            save_name = os.path.join(self.cache_loc,
+                    ('#'.join(image_name.split('/')[-3:])[:-self.extension_length])+'.pkl')
+            
             if os.path.exists(save_name) and not self.overwrite:
                 with open(save_name, 'rb')  as f :
                     hand_mesh_list.append(pickle.load(f))   
