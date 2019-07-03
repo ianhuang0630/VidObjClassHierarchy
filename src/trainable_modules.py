@@ -14,7 +14,7 @@ import scipy as scp
 import cv2
 import pandas as pd
 
-from .input_layers import InputLayer 
+from input_layers import InputLayer 
 
 class VanillaModel(nn.Module):
     def __init__(self):
@@ -43,10 +43,10 @@ class BaselineVanillaModel(nn.Module):
         self.conv_kernel_time_size = conv_kernel_time_size
         self.conv_kernel_feat_size = conv_kernel_feat_size
        
-        assert self.kernel_time_size % 2 == 1, 'kernel_time_size needs to be odd'
-        assert self.kernel_feat_size % 2 == 1, 'kernel_feat_size needs to be odd'
-        self.time_padding = int((self.kernel_time_size-1)/2)
-        self.feat_padding = int((self.kernel_feat_size-1)/2)
+        assert self.conv_kernel_time_size % 2 == 1, 'conv_kernel_time_size needs to be odd'
+        assert self.conv_kernel_feat_size % 2 == 1, 'conv_kernel_feat_size needs to be odd'
+        self.time_padding = int((self.conv_kernel_time_size-1)/2)
+        self.feat_padding = int((self.conv_kernel_feat_size-1)/2)
         self.output_shape = output_shape # 
         
         # fully connected layer for hand/object feature input
@@ -73,13 +73,13 @@ class BaselineVanillaModel(nn.Module):
 
         layers.append(nn.Conv2d(in_channels=1, out_channels=64, 
                 kernel_size=(self.conv_kernel_feat_size, self.conv_kernel_time_size), 
-                stride=(self.features_stride, self.time_stride), 
+                stride=(self.feature_stride, self.time_stride), 
                 padding=(self.feat_padding, self.time_padding)))
         layers.append(nn.ReLU())
         
         layers.append(nn.Conv2d(in_channels=64, out_channels=1,
                 kernel_size=(self.conv_kernel_feat_size, self.conv_kernel_time_size), 
-                stride=(self.features_stride, self.time_stride), 
+                stride=(self.feature_stride, self.time_stride), 
                 padding=(self.feat_padding, self.time_padding)))
         layers.append(nn.ReLU()) 
 
