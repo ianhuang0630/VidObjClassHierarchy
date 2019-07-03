@@ -25,7 +25,7 @@ class VanillaModel(nn.Module):
 class BaselineVanillaModel(nn.Module):
     def __init__(self, feature_input_shape, image_input_shape,
                 num_fcs = 3, fc_output_shapes = [72, 36, 18],
-                output_shape=16, time_conv_filter_width=2
+                output_shape=16, time_conv_filter_width=2,
                 feature_conv_filter_width=4, time_stride=1, feature_stride=2):
 
         super(BaselineVanillaModel, self).__init__()
@@ -59,8 +59,8 @@ class BaselineVanillaModel(nn.Module):
 
         for i in range(num_layers):
             layers.append(nn.Linear(input_shapes[-1], output_shapes[i])) # linear unit
-            layers.append(nn.ReLu()) # nonlinearity
-            input_shapes = output_shapes[i]
+            layers.append(nn.ReLU()) # nonlinearity
+            input_shapes.append(output_shapes[i])
         
         return layers
 
