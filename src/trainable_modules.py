@@ -60,9 +60,12 @@ class BaselineVanillaModel(nn.Module):
         self.feature_conv = nn.Sequential(*conv_layers)
          
         # convolution layers for image input
-        
-        # concatenation of tensors and flattening by mean
+        image_conv_layers = self.make_image_3dconv()
+        self.image_conv = nn.sequential(*image_conv_layers)
+        # output should be NxT
 
+        # concatenation of tensors and flattening by mean
+        
         # final head, composed of multiple fully connected layers.
         # loss will be multi-level loss, so loss of different dimensions are
         # weighted differently. Predict each of these sections separately
@@ -96,6 +99,12 @@ class BaselineVanillaModel(nn.Module):
             input_shapes.append(output_shapes[i])
         
         return layers
+    
+    def make_image_3dconv(self):
+        layers = []
+        layers.append(nn.Conv3d(3, 64, kernel_size=(3,3,3), stride=(2,2,1), padding=(4,2,1)))
+        layers.append(nn.ReLU())
+        return layers
 
     def get_flat_fts(self, in_shape, fts):
         f = fts(Variable(torch.ones(1,*in_shape)))
@@ -105,35 +114,45 @@ class BaselineVanillaModel(nn.Module):
         # [feature] -> linear transform -> conv(t stride 1) -> [D1xT representaiton]
         # [image] -> frame by frame conv 2d -> flatten accross time -> conv (t stride 1) -> [D2xT] representation 
         # stack [D1xT] and [D2xT] concatenation --> conv2d -> flatten -> fully connected
-        feature_embedding = self.feature_conv_layer(x['precomputed_features'])
-        image_embedding = self.image_conv_layer(x['image']) 
+        precomp_feats = x['precomputed_features']
+        image = x['image'] 
         
         # stacking feature_embedding and image_embedding
         
         # extracting feature information
-        feat_fc_out = self.feature_fc(feature_embedding) 
+        feat_fc_out = self.feature_fc(precomp_feats) 
         feat_conv_out = self.feature_conv(fc_out)
         
+        # extracting image information
+        image_conv_out = self.image_conv(image)
 
-         
+        import ipdb; ipdb.set_trace() 
 
-        pass
-
-class ThreeDConv(nn.Module):
-    def __init__(self):
-        super(ThreeDConv, self).__init__()
-    
-    def forward(self, x):
-        pass
-
-class TreeEncoder(nn.Module):
-    def __init__(self):
-        super(TreeEncoder, self).__init__()
-    
-    def foward(self, x): 
-        pass
 
 if __name__=='__main__':
     # loading and preparing tensor
+    dataset_path = '/vision/group/EPIC-KITCHENS/'
+    visual_dataset_path = os.path.join(dataset_path, 'EPIC_KITCHENS_2018.Bingbin')
+    visual_images_foldername = 'object_detection_images'
+    visual_images_folderpath = os.path.join(visual_dataset_path, visual_images_foldername)
+    
+    # TODO: select starting time
+    # TODO: select_ending_time
+    
+
+    images = []
+    for element in ['P04/P04_03/0000007471.jpg', 'P04/P04_03/0000007501.jpg']
+        image_path = os.path.join(visual_images_folderpath,element) 
+        assert os.path.exists(image_path), '{} does not exit'.format(image_path)
+        images.append(image_path)
      
+    IL = InputLayer()
+    feats = IL.get_feature_layer(images)
+    image_mats = np.array([cv2.imread(image_loc).tolist() for image_loc in images])
+     
+
+    x = {'precomputed_features': torch.Tensor(feats), 'image': torch.Tensor(image_mats)}
+    
     BVM = BaselineVanillaModel(108, (23, 23, 108), )
+    output = BVM(x)
+    print(output)

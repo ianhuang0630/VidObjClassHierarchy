@@ -137,7 +137,9 @@ class InputLayer(object):
             
             # left box, right box, left joints, right joints, object_bounding_box
             results.append(np.concatenate([left_bbox, right_bbox, left_pose, right_pose, object_bounding_boxes]))
-
+        
+        # concatenate each of them vertically to make NxT
+        results = np.vstack(results).transpose()
         return results 
                 
 if __name__=='__main__':
