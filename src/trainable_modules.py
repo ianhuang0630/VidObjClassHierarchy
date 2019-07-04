@@ -118,7 +118,7 @@ class BaselineVanillaModel(nn.Module):
         image = x['image'] 
         
         # stacking feature_embedding and image_embedding
-        
+        import ipdb; ipdb.set_trace() 
         # extracting feature information
         feat_fc_out = self.feature_fc(precomp_feats.t()) 
         feat_conv_out = self.feature_conv(feat_fc_out.t())
@@ -147,7 +147,8 @@ if __name__=='__main__':
      
     IL = InputLayer()
     feats = IL.get_feature_layer(images)
-    
+    feats = np.array([[feats.tolist()]]) # (1, 1, num_features, timesteps)
+    import ipdb; ipdb.set_trace()
     image_mats = np.array([cv2.imread(image_loc).tolist() for image_loc in images])
      
 
