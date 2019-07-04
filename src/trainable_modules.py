@@ -61,7 +61,7 @@ class BaselineVanillaModel(nn.Module):
          
         # convolution layers for image input
         image_conv_layers = self.make_image_3dconv()
-        self.image_conv = nn.sequential(*image_conv_layers)
+        self.image_conv = nn.Sequential(*image_conv_layers)
         # output should be NxT
 
         # concatenation of tensors and flattening by mean
@@ -120,9 +120,9 @@ class BaselineVanillaModel(nn.Module):
         # stacking feature_embedding and image_embedding
         
         # extracting feature information
-        feat_fc_out = self.feature_fc(precomp_feats) 
-        feat_conv_out = self.feature_conv(fc_out)
-        
+        feat_fc_out = self.feature_fc(precomp_feats.t()) 
+        feat_conv_out = self.feature_conv(feat_fc_out.t())
+         
         # extracting image information
         image_conv_out = self.image_conv(image)
 
@@ -139,20 +139,22 @@ if __name__=='__main__':
     # TODO: select starting time
     # TODO: select_ending_time
     
-
     images = []
-    for element in ['P04/P04_03/0000007471.jpg', 'P04/P04_03/0000007501.jpg']
-        image_path = os.path.join(visual_images_folderpath,element) 
+    for element in ['P04/P04_03/0000007471.jpg', 'P04/P04_03/0000007501.jpg']:
+        image_path = os.path.join(os.path.join(visual_images_folderpath, 'train'), element) 
         assert os.path.exists(image_path), '{} does not exit'.format(image_path)
         images.append(image_path)
      
     IL = InputLayer()
     feats = IL.get_feature_layer(images)
+    
     image_mats = np.array([cv2.imread(image_loc).tolist() for image_loc in images])
      
 
     x = {'precomputed_features': torch.Tensor(feats), 'image': torch.Tensor(image_mats)}
     
-    BVM = BaselineVanillaModel(108, (23, 23, 108), )
+    import ipdb; ipdb.set_trace()
+
+    BVM = BaselineVanillaModel(x['precomputed_features'].shape[0], x['image'].shape, )
     output = BVM(x)
     print(output)
