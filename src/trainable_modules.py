@@ -151,9 +151,8 @@ if __name__=='__main__':
     import ipdb; ipdb.set_trace()
     image_mats = np.array([cv2.imread(image_loc).tolist() for image_loc in images])
      
-
     x = {'precomputed_features': torch.Tensor(feats), 'image': torch.Tensor(image_mats)}
-    
+     
     import ipdb; ipdb.set_trace()
 
     BVM = BaselineVanillaModel(x['precomputed_features'].shape[0], x['image'].shape, )
