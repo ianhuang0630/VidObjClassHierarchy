@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 import json
 import os
-
+import pickle
 # this class takes in knowns, unknowns, among other parameters, then searches
 # database for sequences of videos in which at least one instance of the known
 # and one instance of the unknown dataset is present. Other formats of this 
@@ -15,11 +15,28 @@ import os
 
 class DatasetFactory(object):
     def __init__(self, knowns, unknowns, object_data_path, action_data_path,
-            class_key_path, cache_folder='dataset_cache/', options='separate'):
+            class_key_path, cache_folder='dataset_cache/', options='separate',
+            known_format = 'clips', overwrite=False):
         """
         Args:
             knowns: list of known class ids
             unknowns: list of unknown class ids
+            object_data_path: path to the object data csv
+            action_data_path: path to the action data csv
+            class_key_path: path to the csv converting between numerical labels
+                to linguistic ones
+            cache_folder: Where to save the results for future use
+            options: can be either 'separate' or 'coexistence'. When ='separate',
+                we only require that the output for unknown classes contain clips
+                featuringsone of the unknown classes (with no restrictions on
+                whether any known classes are present). When ='coexistence', it 
+                is required that at least one of each set (known and unknown) is
+                featured in a video clip.
+            known_format: can either be 'clips' or 'video'. Clips are cut out to
+                tightly temporally bound the presence of known classes, whereas
+                when 'video' option is on, the whole video containing a known
+                class is returned.
+            overwrite: whether to overwrite cache
         """
         self.known_classes = knowns
         self.unknown_classes = unknowns 
@@ -29,18 +46,32 @@ class DatasetFactory(object):
         self.class_key_path = class_key_path
         if not os.path.exists(cache_folder):
             os.makedirs(cache_folder, exist_ok=True)
+        self.overwrite = overwrite
+        self.known_format = known_format
         # path to the cache folder
         self.cache_folder = cache_folder
         # loading all datasets using pandas
         self.object_data = pd.read_csv(self.object_data_path)
         self.action_data = pd.read_csv(self.action_data_path)
         self.class_key = pd.read_csv(self.class_key_path) 
+        
         self.cache_filename = 'known_'+'_'.join([str(element) for element in sorted(self.unknown_classes)]) \
                     +'_unknown_'+'_'.join([str(element) for element in sorted(self.known_classes)]) +'.json'
- 
+        self.config_filename = 'config_known_'+'_'.join([str(element) for element in sorted(self.unknown_classes)]) \
+                    +'_unknown_'+'_'.join([str(element) for element in sorted(self.known_classes)]) +'.pkl'
+        self.config = {'known_classes': self.known_classes,
+                'unknown_classses': self.unknown_classes,
+                'object_csv': self.object_data_path,
+                'action_csv': self.action_data_path,
+                'class_key_csv': self.class_key_path,
+                'overwrite': self.overwrite,
+                'known_format': self.known_format,
+                'cache_folder': self.cache_folder}
+        
+
         self.options = options
         # first search the cache folder
-        if self.found_in_cache():
+        if self.found_in_cache() and not self.overwrite:
             # loading cache
             print('Exact requirements found in cache, loading from cache folder...')
             self.dataset = self.load_cache()
@@ -50,7 +81,10 @@ class DatasetFactory(object):
             print('Requirements not satisfied in cache, constructing dataset now...')
             self.dataset = self.construct_dataset()
             print('Done.')
-            print('Saving to file: ') 
+            print('Saving to file: ')
+            
+            with open(os.path.join(self.cache_folder, self.config_filename), 'wb') as f:
+                pickle.dump(self.config, f) 
             with open(os.path.join(self.cache_folder, self.cache_filename), 'w') as f:
             	json.dump(self.dataset, f)  
             print('Done.')
@@ -60,7 +94,12 @@ class DatasetFactory(object):
 
     def found_in_cache(self):
         # TODO
-        return os.path.exists(os.path.join(self.cache_folder, self.cache_filename))
+        if os.path.exists(os.path.join(self.cache_folder, self.config_filename)):
+            with open(os.path.join(self.cache_folder, self.config_filename), 'rb') as f:
+                return self.config == pickle.load(f) \
+                        and os.path.exists(os.path.join(self.cache_folder, self.cache_filename))
+        else:
+            return False
 
     def load_cache(self):
         with open(os.path.join(self.cache_folder, self.cache_filename), 'r') as f:
@@ -75,13 +114,18 @@ class DatasetFactory(object):
             return None
         elif self.options == 'separate':
             video_candidates = self.get_known_unknown_candidates()
-            unknown_clips = self.search_known_unknown(video_candidates)
-            known_videos = self.organize_known(video_candidates)
-            return {'known': known_videos, 'unknown': unknown_clips}
+            unknown_clips = self.search_clips(video_candidates, search_target = 'unknown')
+            if self.known_format == 'clips':
+                known_clips = self.search_clips(video_candidates, search_target = 'known')
+                print('Done.')
+                return {'known': known_videos, 'unknown': unknown_clips}
+            elif self.known_format == 'videos':
+                known_videos = self.organize_known(video_candidates)
+                print('Done.')
+                return {'known': known_videos, 'unknown': unknown_clips}
         # filter candidates
         else:
             raise ValueError('{} not recognized as an option'.format(self.options))
-        print('Done.')
 
     def get_coexistence_candidates(self):
         # filter out data with both known and unknowns
@@ -123,18 +167,26 @@ class DatasetFactory(object):
                     video_candidates['unknown'].append((subject, video_id, subsub_df))
         print("Done")
         return video_candidates
-    
-    def search_known_unknown(self, video_candidates):
+     
+    def search_clips(self, video_candidates, search_target):
         # organize current video by frame number, video_candidates
         # return 'participant_id', 'video id', 'start_frame', 'end_frame' for 
         # every single class in only unknonw (if mode is known_unknown)
         dataset = []
-        for video in video_candidates['unknown']:
+        if search_target == 'unknown':
+            set_of_interest = self.unknown_classes
+        elif search_target == 'known':
+            set_of_interest = self.known_classes
+        else:
+            raise ValueError('{} is not a valid objection for search_target.'.format(search_target))
+
+        for video in video_candidates[search_target]:
             video_id = video[0]
             participant_id = video[1]
+
             # helpful datastructures 
-            states_dict = {element: 'off' for element in self.unknown_classes}
-            stacks_dict = {element: [] for element in self.unknown_classes}
+            states_dict = {element: 'off' for element in set_of_interest}
+            stacks_dict = {element: [] for element in set_of_interest} 
             sorted_video = video[2].sort_values(by=['frame']) 
             
             # now proceed to find the clips.
