@@ -102,8 +102,10 @@ class BaselineVanillaModel(nn.Module):
     
     def make_image_3dconv(self):
         layers = []
-        layers.append(nn.Conv3d(3, 64, kernel_size=(3,3,3), stride=(2,2,1), padding=(4,2,1)))
+        # TODO: check that the kernelsize strides along the time dimension is correct
+        layers.append(nn.Conv3d(3, 64, kernel_size=(2,3,3), stride=(2,2,1), padding=(4,2,1)))
         layers.append(nn.ReLU())
+
         return layers
 
     def get_flat_fts(self, in_shape, fts):
@@ -118,17 +120,16 @@ class BaselineVanillaModel(nn.Module):
         image = x['image'] 
         
         # stacking feature_embedding and image_embedding
-        import ipdb; ipdb.set_trace() 
         # extracting feature information
         feat_fc_out = self.feature_fc(precomp_feats.t()) 
         reformatted = feat_fc_out.t().view(-1, 1, feat_fc_out.shape[1], feat_fc_out.shape[0])
         feat_conv_out = self.feature_conv(reformatted)
-         
+        
+        import ipdb; ipdb.set_trace()
         # extracting image information
         image_conv_out = self.image_conv(image)
 
-        import ipdb; ipdb.set_trace() 
-
+        return feat_conv_out, image_conv_out
 
 if __name__=='__main__':
     # loading and preparing tensor
@@ -149,13 +150,17 @@ if __name__=='__main__':
     IL = InputLayer()
     feats = IL.get_feature_layer(images)
     # feats = np.array([[feats.tolist()]]) # (1, 1, num_features, timesteps)
+    batches = []
+    for batch in range(1): # one batch
+        image_resized = []
+        for image_loc in images:
+            raw_images = cv2.imread(image_loc)
+            scaled_images = cv2.resize(raw_images, (int(raw_images.shape[0]/2), int(raw_images.shape[1]/2)))
+            image_resized.append(scaled_images.tolist())
+        batches.append(image_resized)
+    batches = np.array(batches).transpose([0, 4, 1, 2, 3])
+    x = {'precomputed_features': torch.Tensor(feats), 'image': torch.Tensor(batches)}
     import ipdb; ipdb.set_trace()
-    image_mats = np.array([cv2.imread(image_loc).tolist() for image_loc in images])
-     
-    x = {'precomputed_features': torch.Tensor(feats), 'image': torch.Tensor(image_mats)}
-     
-    import ipdb; ipdb.set_trace()
-
     BVM = BaselineVanillaModel(x['precomputed_features'].shape[0], x['image'].shape, )
     output = BVM(x)
     print(output)
