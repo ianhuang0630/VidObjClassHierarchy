@@ -101,6 +101,7 @@ class DatasetFactory(object):
         # a subset of all knowns to pretrain the tree hierarchy predictor g
         
         known_data = self.dataset['known']
+        
         pass     
         # the *other* subset of all knowns and the whole set of unknowns
 
@@ -132,7 +133,7 @@ class DatasetFactory(object):
             if self.known_format == 'clips':
                 known_clips = self.search_clips(video_candidates, search_target = 'known')
                 print('Done.')
-                return {'known': known_videos, 'unknown': unknown_clips}
+                return {'known': known_clips, 'unknown': unknown_clips}
             elif self.known_format == 'videos':
                 known_videos = self.organize_known(video_candidates)
                 print('Done.')
