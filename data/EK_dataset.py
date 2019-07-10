@@ -4,6 +4,7 @@ This script is created for classes that loads the data in various different ways
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+import random
 
 import json
 import os
@@ -101,9 +102,30 @@ class DatasetFactory(object):
         # a subset of all knowns to pretrain the tree hierarchy predictor g
         
         known_data = self.dataset['known']
+        knowns = {}
+        for sample in known_data:
+            if sample['noun_class'] not in knowns:
+                knowns[sample['noun_class']] = [sample]
+            else:
+                knowns[sample['noun_class']].append(sample)
         
-        pass     
-        # the *other* subset of all knowns and the whole set of unknowns
+        assert all([len(knowns[key]) >=2  for key in knowns])
+        
+        known_pretrain = []
+        known_train = []
+        # splitting 80-20 training-pretraining
+        for class_ in knowns:
+            num_pretrain_samples = int(len(knowns[class_]) * 0.2) # round up
+            pretrain_data = np.random.choice(knowns[class_], num_pretrain_samples,
+                                    replace=False)  
+            known_pretrain.extend(list(pretrain_data))
+            train_data = list(set(knowns[class_]) - set(list(pretrain_indices)))
+            known_train.extend(train_data) 
+
+        random.shuffle(known_pretrain)
+        random.shuffle(known_train)
+
+        return {'pretrain': known_pretrain, 'train': known_train}
 
     def visualize_dataset_info(self):
         pass
@@ -249,6 +271,7 @@ class DatasetFactory(object):
                             'start_frame': start_frame,
                             'end_frame': end_frame,
                             'noun_class': class_}) 
+        return dataset 
 
     def window_search_coexistence(self):
         pass
