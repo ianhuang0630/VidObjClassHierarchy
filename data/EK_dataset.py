@@ -91,10 +91,16 @@ class DatasetFactory(object):
             print('Done.')
             print('Saving to file: ')
             
+            # pretraining and training split over the knowns
+            split = self.get_pretrain_training_split()
+            final_dataset = {'known': split['train'], 
+                             'unknown': self.dataset['unknown'],
+                             'known_pretrain': split['pretrain']}
+        
             with open(os.path.join(self.cache_folder, self.config_filename), 'wb') as f:
                 pickle.dump(self.config, f) 
             with open(os.path.join(self.cache_folder, self.cache_filename), 'w') as f:
-            	json.dump(self.dataset, f)  
+            	json.dump(final_dataset, f)  
             print('Done.')
     
     def get_pretrain_training_split(self):
@@ -115,16 +121,17 @@ class DatasetFactory(object):
         known_train = []
         # splitting 80-20 training-pretraining
         for class_ in knowns:
-            num_pretrain_samples = int(len(knowns[class_]) * 0.2) # round up
-            pretrain_data = np.random.choice(knowns[class_], num_pretrain_samples,
+            num_pretrain_samples = int(np.ceil(len(knowns[class_]) * 0.2)) # round up
+            pretrain_indices = np.random.choice(range(len(knowns[class_])), num_pretrain_samples,
                                     replace=False)  
-            known_pretrain.extend(list(pretrain_data))
-            train_data = list(set(knowns[class_]) - set(list(pretrain_indices)))
-            known_train.extend(train_data) 
+            pretrain_data = [knowns[class_][i] for i in pretrain_indices]
+            known_pretrain.extend(pretrain_data)
 
+            train_indices = list(set(range(len(knowns[class_]))) - set(pretrain_indices))
+            train_data = [knowns[class_][i] for i in train_indices]
+            known_train.extend(train_data) 
         random.shuffle(known_pretrain)
         random.shuffle(known_train)
-
         return {'pretrain': known_pretrain, 'train': known_train}
 
     def visualize_dataset_info(self):
