@@ -53,8 +53,15 @@ class DatasetFactory(object):
         # loading all datasets using pandas
         self.object_data = pd.read_csv(self.object_data_path)
         self.action_data = pd.read_csv(self.action_data_path)
-        self.class_key = pd.read_csv(self.class_key_path) 
+        self.class_key_df = pd.read_csv(self.class_key_path) 
         
+        # TODO: using the key, convert strings into unkowns
+        class_key_dict = dict(zip(self.class_key_df.class_key, self.class_key_df.noun_id))
+        if all([type(element) is str for element in self.known_classes]):
+            self.known_classes = [class_key_dict[element] for element in self.known_classes]
+        if all([type(element) is str for element in self.unknown_classes]):
+            self.unknown_classes = [class_key_dict[element] for element in self.unknown_classes]
+
         self.cache_filename = 'known_'+'_'.join([str(element) for element in sorted(self.unknown_classes)]) \
                     +'_unknown_'+'_'.join([str(element) for element in sorted(self.known_classes)]) +'.json'
         self.config_filename = 'config_known_'+'_'.join([str(element) for element in sorted(self.unknown_classes)]) \
@@ -89,6 +96,14 @@ class DatasetFactory(object):
             	json.dump(self.dataset, f)  
             print('Done.')
     
+    def get_pretrain_training_split(self):
+        # now, we split self.dataset into two parts
+        # a subset of all knowns to pretrain the tree hierarchy predictor g
+        
+        known_data = self.dataset['known']
+        pass     
+        # the *other* subset of all knowns and the whole set of unknowns
+
     def visualize_dataset_info(self):
         pass
 
@@ -111,7 +126,6 @@ class DatasetFactory(object):
         if self.options == 'coexistence':
             video_candidates = self.get_coexistence_candidates()
             raise ValueError('Not fully implemented.')
-            return None
         elif self.options == 'separate':
             video_candidates = self.get_known_unknown_candidates()
             unknown_clips = self.search_clips(video_candidates, search_target = 'unknown')
@@ -129,6 +143,7 @@ class DatasetFactory(object):
 
     def get_coexistence_candidates(self):
         # filter out data with both known and unknowns
+        raise ValueError('Not fully implemented')
         video_candidates = []
         print("Scanning each subject for candidate video frames...")
         for subject in tqdm(list(set(self.object_data['participant_id']))):
