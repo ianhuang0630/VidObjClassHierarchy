@@ -45,6 +45,34 @@ def get_tree_distance(class1, class2, tree_file='hierarchyV1.json'):
             distances.append(tree_dist(loc1, loc2))
         return distances  
 
+
+def survey_tree(known_classes, tree_file='hierarchyV1.json'):
+    assert os.path.exists(tree_file), '{} does not exist'.format(tree_file)
+    
+    with open(tree_file, 'r') as f:
+        hierarchy = json.load(f)
+    assert type(hierarchy) == dict
+    
+    known_classes_set = set(known_classes)
+
+    map_ = {}
+
+    counter1 = 0
+    for layer1_class in hierarchy:
+        counter2 = 0
+        for layer2_subhierarchy in hierarchy[layer1_class]:
+            layer2_class = list(layer2_subhierarchy.keys())[0]
+            subsubhierarchy = layer2_subhierarchy[layer2_class]
+            # subsubhierarchy should be a list 
+            counter3 = 0
+            for layer3_class in subsubhierarchy:
+                if layer3_class in known_classes_set:
+                    counter3 += 1
+            counter2 += 1
+            map_[(counter1, counter2)] = counter3 # number for the unknown class in this category
+        counter1 += 1
+    return map_ 
+
 def get_tree_position(class_, known_classes, tree_file='hierarchyV1.json'):
     """ gets vector encoding of the position within the tree
     """
@@ -54,10 +82,10 @@ def get_tree_position(class_, known_classes, tree_file='hierarchyV1.json'):
         hierarchy = json.load(f)
     assert type(hierarchy) == dict
     
-    locations_per_layer3_class = {}
     known_classes_set = set(known_classes)
 
     encoding = None
+
     counter1 = 0
     for layer1_class in hierarchy:
         counter2 = 0
@@ -69,14 +97,13 @@ def get_tree_position(class_, known_classes, tree_file='hierarchyV1.json'):
             for layer3_class in subsubhierarchy:
                 if layer3_class == class_ and layer3_class in known_classes_set:
                     encoding = np.array([counter1, counter2, counter3])
-                    return encoding
                     counter3 += 1
                 elif layer3_class in known_classes_set:
                     counter3 += 1
             counter2 += 1
         counter1 += 1
-
-    raise ValueError('{} is not an existing class in current hierarchy') 
+         
+    return encoding 
 
 def get_random_known_unknown_split(tree_file='hierarchyV1.json'):
     """ gets the training/testing known/unknown splits
