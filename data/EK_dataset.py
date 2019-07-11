@@ -233,11 +233,12 @@ class DatasetFactory(object):
             set_of_interest = self.known_classes
         else:
             raise ValueError('{} is not a valid objection for search_target.'.format(search_target))
-
+        
+        all_frame_bounding_boxes = {}
         for video in video_candidates[search_target]:
             video_id = video[0]
             participant_id = video[1]
-
+            
             # helpful datastructures 
             states_dict = {element: 'off' for element in set_of_interest}
             stacks_dict = {element: [] for element in set_of_interest} 
@@ -249,11 +250,11 @@ class DatasetFactory(object):
             frame_index = 0
             for index, row  in sorted_video.iterrows():
                 if row['frame'] not in frame_to_bounding_boxes:
-                    frame_to_bounding_boxes[row['frame']] = \
+                    frame_to_bounding_boxes[int(row['frame'])] = \
                             [{'noun_class':row['noun_class'], 
                                 'bbox':row['bounding_boxes']}]
                 else:
-                    frame_to_bounding_boxes[row['frame']].append(
+                    frame_to_bounding_boxes[int(row['frame'])].append(
                             {'noun_class': row['noun_class'], 
                                 'bbox': row['bounding_boxes']}
                             )
@@ -268,7 +269,7 @@ class DatasetFactory(object):
                         frames_and_classes[-1].append(row['noun_class'])
                 else:
                     raise ValueError("current frame is {} but frame_index is {}".format(row['frame'], frame_index))
-
+            all_frame_to_bounding_boxes[(participant_id, video_id)] = frame_to_bounding_boxes 
             for idx, element in enumerate(tqdm(frames_and_classes)):
                 for class_ in states_dict:
                     if class_ in element[1:] and states_dict[class_] == 'off':
@@ -283,7 +284,8 @@ class DatasetFactory(object):
                                         'start_frame': start_frame,
                                         'end_frame': end_frame,
                                         'noun_class': class_})
-        return dataset, frame_to_bounding_boxes 
+             
+        return dataset, all_frame_to_bounding_boxes 
     
     def organize_known(self, video_candidates):
         dataset = []
