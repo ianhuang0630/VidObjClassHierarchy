@@ -4,6 +4,7 @@ This script is created for classes that loads the data in various different ways
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+import random
 
 import json
 import os
@@ -53,8 +54,15 @@ class DatasetFactory(object):
         # loading all datasets using pandas
         self.object_data = pd.read_csv(self.object_data_path)
         self.action_data = pd.read_csv(self.action_data_path)
-        self.class_key = pd.read_csv(self.class_key_path) 
+        self.class_key_df = pd.read_csv(self.class_key_path) 
         
+        # TODO: using the key, convert strings into unkowns
+        class_key_dict = dict(zip(self.class_key_df.class_key, self.class_key_df.noun_id))
+        if all([type(element) is str for element in self.known_classes]):
+            self.known_classes = [class_key_dict[element] for element in self.known_classes]
+        if all([type(element) is str for element in self.unknown_classes]):
+            self.unknown_classes = [class_key_dict[element] for element in self.unknown_classes]
+
         self.cache_filename = 'known_'+'_'.join([str(element) for element in sorted(self.unknown_classes)]) \
                     +'_unknown_'+'_'.join([str(element) for element in sorted(self.known_classes)]) +'.json'
         self.config_filename = 'config_known_'+'_'.join([str(element) for element in sorted(self.unknown_classes)]) \
@@ -74,7 +82,7 @@ class DatasetFactory(object):
         if self.found_in_cache() and not self.overwrite:
             # loading cache
             print('Exact requirements found in cache, loading from cache folder...')
-            self.dataset = self.load_cache()
+            self.final_dataset = self.load_cache()
             print('Done.')
         else:
             # if not in cache folder, call self.construct_dataset()
@@ -82,13 +90,56 @@ class DatasetFactory(object):
             self.dataset = self.construct_dataset()
             print('Done.')
             print('Saving to file: ')
+            # pretraining and training split over the knowns
+            split = self.get_pretrain_training_split()
+            self.final_dataset = {'known': split['train'], 
+                             'unknown': self.dataset['unknown'],
+                             'known_pretrain': split['pretrain']}
             
+            if 'unknown_frame2bbox' in self.dataset and 'known_frame2bbox' in self.dataset:
+                self.final_dataset['unknown_frame2bbox'] = self.dataset['unknown_frame2bbox']
+                self.final_dataset['known_frame2bbox'] = self.dataset['known_frame2bbox']
+
             with open(os.path.join(self.cache_folder, self.config_filename), 'wb') as f:
                 pickle.dump(self.config, f) 
             with open(os.path.join(self.cache_folder, self.cache_filename), 'w') as f:
-            	json.dump(self.dataset, f)  
+            	json.dump(self.final_dataset, f)  
             print('Done.')
     
+    def get_dataset(self):
+        return self.final_dataset
+
+    def get_pretrain_training_split(self):
+        # now, we split self.dataset into two parts
+        # a subset of all knowns to pretrain the tree hierarchy predictor g
+        
+        known_data = self.dataset['known']
+        knowns = {}
+        for sample in known_data:
+            if sample['noun_class'] not in knowns:
+                knowns[sample['noun_class']] = [sample]
+            else:
+                knowns[sample['noun_class']].append(sample)
+        
+        assert all([len(knowns[key]) >=2  for key in knowns])
+        
+        known_pretrain = []
+        known_train = []
+        # splitting 80-20 training-pretraining
+        for class_ in knowns:
+            num_pretrain_samples = int(np.ceil(len(knowns[class_]) * 0.2)) # round up
+            pretrain_indices = np.random.choice(range(len(knowns[class_])), num_pretrain_samples,
+                                    replace=False)  
+            pretrain_data = [knowns[class_][i] for i in pretrain_indices]
+            known_pretrain.extend(pretrain_data)
+
+            train_indices = list(set(range(len(knowns[class_]))) - set(pretrain_indices))
+            train_data = [knowns[class_][i] for i in train_indices]
+            known_train.extend(train_data) 
+        random.shuffle(known_pretrain)
+        random.shuffle(known_train)
+        return {'pretrain': known_pretrain, 'train': known_train}
+
     def visualize_dataset_info(self):
         pass
 
@@ -111,14 +162,15 @@ class DatasetFactory(object):
         if self.options == 'coexistence':
             video_candidates = self.get_coexistence_candidates()
             raise ValueError('Not fully implemented.')
-            return None
         elif self.options == 'separate':
             video_candidates = self.get_known_unknown_candidates()
-            unknown_clips = self.search_clips(video_candidates, search_target = 'unknown')
+            unknown_clips, unknown_frame2bbox = self.search_clips(video_candidates, search_target = 'unknown')
             if self.known_format == 'clips':
-                known_clips = self.search_clips(video_candidates, search_target = 'known')
+                known_clips, known_frame2bbox = self.search_clips(video_candidates, search_target = 'known')
                 print('Done.')
-                return {'known': known_videos, 'unknown': unknown_clips}
+                return {'known': known_clips, 'unknown': unknown_clips, 
+                        'known_frame2bbox': known_frame2bbox,
+                        'unknown_frame2bbox': unknown_frame2bbox}
             elif self.known_format == 'videos':
                 known_videos = self.organize_known(video_candidates)
                 print('Done.')
@@ -129,6 +181,7 @@ class DatasetFactory(object):
 
     def get_coexistence_candidates(self):
         # filter out data with both known and unknowns
+        raise ValueError('Not fully implemented')
         video_candidates = []
         print("Scanning each subject for candidate video frames...")
         for subject in tqdm(list(set(self.object_data['participant_id']))):
@@ -167,6 +220,7 @@ class DatasetFactory(object):
                     video_candidates['unknown'].append((subject, video_id, subsub_df))
         print("Done")
         return video_candidates
+            
      
     def search_clips(self, video_candidates, search_target):
         # organize current video by frame number, video_candidates
@@ -179,11 +233,12 @@ class DatasetFactory(object):
             set_of_interest = self.known_classes
         else:
             raise ValueError('{} is not a valid objection for search_target.'.format(search_target))
-
+        
+        all_frame_bounding_boxes = {}
         for video in video_candidates[search_target]:
             video_id = video[0]
             participant_id = video[1]
-
+            
             # helpful datastructures 
             states_dict = {element: 'off' for element in set_of_interest}
             stacks_dict = {element: [] for element in set_of_interest} 
@@ -191,8 +246,19 @@ class DatasetFactory(object):
             
             # now proceed to find the clips.
             frames_and_classes = []
+            frame_to_bounding_boxes = {}
             frame_index = 0
             for index, row  in sorted_video.iterrows():
+                if row['frame'] not in frame_to_bounding_boxes:
+                    frame_to_bounding_boxes[int(row['frame'])] = \
+                            [{'noun_class':row['noun_class'], 
+                                'bbox':row['bounding_boxes']}]
+                else:
+                    frame_to_bounding_boxes[int(row['frame'])].append(
+                            {'noun_class': row['noun_class'], 
+                                'bbox': row['bounding_boxes']}
+                            )
+
                 if row['frame'] > frame_index:
                     # first bounding box in new frame
                     if row['bounding_boxes'] != '[]':
@@ -203,7 +269,7 @@ class DatasetFactory(object):
                         frames_and_classes[-1].append(row['noun_class'])
                 else:
                     raise ValueError("current frame is {} but frame_index is {}".format(row['frame'], frame_index))
-
+            all_frame_to_bounding_boxes[(participant_id, video_id)] = frame_to_bounding_boxes 
             for idx, element in enumerate(tqdm(frames_and_classes)):
                 for class_ in states_dict:
                     if class_ in element[1:] and states_dict[class_] == 'off':
@@ -218,7 +284,8 @@ class DatasetFactory(object):
                                         'start_frame': start_frame,
                                         'end_frame': end_frame,
                                         'noun_class': class_})
-        return dataset 
+             
+        return dataset, all_frame_to_bounding_boxes 
     
     def organize_known(self, video_candidates):
         dataset = []
@@ -233,6 +300,7 @@ class DatasetFactory(object):
                             'start_frame': start_frame,
                             'end_frame': end_frame,
                             'noun_class': class_}) 
+        return dataset 
 
     def window_search_coexistence(self):
         pass
