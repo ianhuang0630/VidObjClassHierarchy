@@ -90,7 +90,6 @@ class DatasetFactory(object):
             self.dataset = self.construct_dataset()
             print('Done.')
             print('Saving to file: ')
-            
             # pretraining and training split over the knowns
             split = self.get_pretrain_training_split()
             self.final_dataset = {'known': split['train'], 
@@ -165,13 +164,13 @@ class DatasetFactory(object):
             raise ValueError('Not fully implemented.')
         elif self.options == 'separate':
             video_candidates = self.get_known_unknown_candidates()
-            unknown_clips, unknown_frames2bbox = self.search_clips(video_candidates, search_target = 'unknown')
+            unknown_clips, unknown_frame2bbox = self.search_clips(video_candidates, search_target = 'unknown')
             if self.known_format == 'clips':
-                known_clips, known_frames2bbox = self.search_clips(video_candidates, search_target = 'known')
+                known_clips, known_frame2bbox = self.search_clips(video_candidates, search_target = 'known')
                 print('Done.')
                 return {'known': known_clips, 'unknown': unknown_clips, 
                         'known_frame2bbox': known_frame2bbox,
-                        'unknown_frame2bbox': unknown_frame2bbox},
+                        'unknown_frame2bbox': unknown_frame2bbox}
             elif self.known_format == 'videos':
                 known_videos = self.organize_known(video_candidates)
                 print('Done.')
@@ -246,11 +245,10 @@ class DatasetFactory(object):
             
             # now proceed to find the clips.
             frames_and_classes = []
-            frames_to_bounding_boxes = {}
+            frame_to_bounding_boxes = {}
             frame_index = 0
             for index, row  in sorted_video.iterrows():
-                # adding to frames_to_bounding_boxes
-                if row['frame'] not in frames_to_bounding_boxes:
+                if row['frame'] not in frame_to_bounding_boxes:
                     frame_to_bounding_boxes[row['frame']] = \
                             [{'noun_class':row['noun_class'], 
                                 'bbox':row['bounding_boxes']}]
