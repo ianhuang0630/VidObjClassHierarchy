@@ -82,7 +82,7 @@ class DatasetFactory(object):
         if self.found_in_cache() and not self.overwrite:
             # loading cache
             print('Exact requirements found in cache, loading from cache folder...')
-            self.dataset = self.load_cache()
+            self.final_dataset = self.load_cache()
             print('Done.')
         else:
             # if not in cache folder, call self.construct_dataset()
@@ -93,16 +93,23 @@ class DatasetFactory(object):
             
             # pretraining and training split over the knowns
             split = self.get_pretrain_training_split()
-            final_dataset = {'known': split['train'], 
+            self.final_dataset = {'known': split['train'], 
                              'unknown': self.dataset['unknown'],
                              'known_pretrain': split['pretrain']}
-        
+            
+            if 'unknown_frame2bbox' in self.dataset and 'known_frame2bbox' in self.dataset:
+                self.final_dataset['unknown_frame2bbox'] = self.dataset['unknown_frame2bbox']
+                self.final_dataset['known_frame2bbox'] = self.dataset['known_frame2bbox']
+
             with open(os.path.join(self.cache_folder, self.config_filename), 'wb') as f:
                 pickle.dump(self.config, f) 
             with open(os.path.join(self.cache_folder, self.cache_filename), 'w') as f:
-            	json.dump(final_dataset, f)  
+            	json.dump(self.final_dataset, f)  
             print('Done.')
     
+    def get_dataset(self):
+        return self.final_dataset
+
     def get_pretrain_training_split(self):
         # now, we split self.dataset into two parts
         # a subset of all knowns to pretrain the tree hierarchy predictor g
@@ -158,11 +165,13 @@ class DatasetFactory(object):
             raise ValueError('Not fully implemented.')
         elif self.options == 'separate':
             video_candidates = self.get_known_unknown_candidates()
-            unknown_clips = self.search_clips(video_candidates, search_target = 'unknown')
+            unknown_clips, unknown_frames2bbox = self.search_clips(video_candidates, search_target = 'unknown')
             if self.known_format == 'clips':
-                known_clips = self.search_clips(video_candidates, search_target = 'known')
+                known_clips, known_frames2bbox = self.search_clips(video_candidates, search_target = 'known')
                 print('Done.')
-                return {'known': known_clips, 'unknown': unknown_clips}
+                return {'known': known_clips, 'unknown': unknown_clips, 
+                        'known_frame2bbox': known_frame2bbox,
+                        'unknown_frame2bbox': unknown_frame2bbox},
             elif self.known_format == 'videos':
                 known_videos = self.organize_known(video_candidates)
                 print('Done.')
@@ -212,6 +221,7 @@ class DatasetFactory(object):
                     video_candidates['unknown'].append((subject, video_id, subsub_df))
         print("Done")
         return video_candidates
+            
      
     def search_clips(self, video_candidates, search_target):
         # organize current video by frame number, video_candidates
@@ -236,8 +246,20 @@ class DatasetFactory(object):
             
             # now proceed to find the clips.
             frames_and_classes = []
+            frames_to_bounding_boxes = {}
             frame_index = 0
             for index, row  in sorted_video.iterrows():
+                # adding to frames_to_bounding_boxes
+                if row['frame'] not in frames_to_bounding_boxes:
+                    frame_to_bounding_boxes[row['frame']] = \
+                            [{'noun_class':row['noun_class'], 
+                                'bbox':row['bounding_boxes']}]
+                else:
+                    frame_to_bounding_boxes[row['frame']].append(
+                            {'noun_class': row['noun_class'], 
+                                'bbox': row['bounding_boxes']}
+                            )
+
                 if row['frame'] > frame_index:
                     # first bounding box in new frame
                     if row['bounding_boxes'] != '[]':
@@ -263,7 +285,7 @@ class DatasetFactory(object):
                                         'start_frame': start_frame,
                                         'end_frame': end_frame,
                                         'noun_class': class_})
-        return dataset 
+        return dataset, frame_to_bounding_boxes 
     
     def organize_known(self, video_candidates):
         dataset = []
