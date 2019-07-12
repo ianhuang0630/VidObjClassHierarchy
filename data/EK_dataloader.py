@@ -12,7 +12,7 @@ import os
 import ast
 
 from gt_hierarchy import *
-from EK_dataset import DataFactory
+from EK_dataset import DatasetFactory
 
 DEBUG = True
 
@@ -27,6 +27,7 @@ class EK_Dataset(Dataset):
     def __init__(self, knowns, unknowns,
             object_data_path,
             action_data_path,
+            class_key_path,
             image_data_folder,
             filter_function = default_filter_function,
             transform=None):
@@ -35,21 +36,26 @@ class EK_Dataset(Dataset):
         self.knowns = knowns
         self.unknowns = unknowns
         self.transform = transform
+        self.class_key_df = pd.read_csv(class_key_path) 
+        # TODO: using the key, convert strings into unkowns
+        self.class_key_dict = dict(zip(self.class_key_df.class_key, self.class_key_df.noun_id))
+        self.noun_dict = dict(zip(self.class_key_df.noun_id, self.class_key_df.class_key))
+
         super(EK_Dataset, self).__init__()
         self.DF = DatasetFactory(knowns, unknowns, 
                     object_data_path, action_data_path, class_key_path)        
         
-        self.dataset = self.DF.get_dataset
+        self.dataset = self.DF.get_dataset()
         assert 'unknown_frame2bbox' in self.dataset \
                 and 'known_frame2bbox' in self.dataset, 'frame2bbox conversion not found'
         self.pretrain_knowns = self.dataset['known_pretrain']
         self.training_knowns = self.dataset['known']
         self.training_unknowns = self.dataset['unknown']
-        self.known_f2bbox = self.dataset['known_f2bbox']
-        self.unknown_f2bbox = self.dataset['unknown_f2bbox']
+        self.known_f2bbox = self.dataset['known_frame2bbox']
+        self.unknown_f2bbox = self.dataset['unknown_frame2bbox']
         # merging both of the f2bbox's
         self.f2bbox = {}
-        for frame in list(set(self.known_f2bbox.keys()) + set(self.unknown_f2bbox.keys())):
+        for frame in list(set(self.known_f2bbox.keys()).union(set(self.unknown_f2bbox.keys()))):
             for_this_frame = []
             if frame in self.known_f2bbox:
                 for_this_frame.extend(self.known_f2bbox[frame])
@@ -83,31 +89,35 @@ class EK_Dataset(Dataset):
             # loading this frame
             file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(a))[-10:]+'.jpg'
             image_path = os.path.join(self.image_data_folder, file_path)
+            try:
+                bboxes = self.f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
+            except KeyError:
+                a += 30
+                # print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
+                continue # this would ignore all the cases where the bounding box doesn't exist
             frames.append(cv2.imread(image_path))
-            bboxes = self.f2bbox[a]
-            valid_candidates = [bbox for bbox in bboxes if bbox[0]==sample_dict['noun_class']]
+            valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
             if len(valid_candidates)==0 or valid_candidates[0] == '[]':
                 gt_bbox.append(np.array([0,0,0,0]))
             else:
                 # parse valid_candidates into array
                 # TODO
-                gt_bbox.append(np.array(ast.literal_eval(valid_candidates[0])))
+                gt_bbox.append(np.array(ast.literal_eval(valid_candidates[0]['bbox'])))
             a += 30
         frames = np.stack(frames, axis=3) # T x W x H x C
         gt_bbox = np.stack(frames, axis=1)  # T x 4
         # get position in the tree
-        
-        encoding = get_tree_position(sample_dict['noun_class'], self.knowns) 
+        encoding = get_tree_position(self.noun_dict[sample_dict['noun_class']], self.knowns) 
         if encoding is None:
-            top_levels = tuple(get_tree_position(sample_dict['noun_class'], self.unknowns)[:-1])  
+            top_levels = tuple(get_tree_position(self.noun_dict[sample_dict['noun_class']], self.unknowns)[:-1])  
             assert top_levels in self.unknown_lowest_level_label
-            encoding = np.array(list(top_levels)+[self.unknown_lowest_level_label[top_levels]])
-       
+            encoding = np.array(list(top_levels)+[self.unknown_lowest_level_label[top_levels][0]])
         
-        d = {'frames': frames, 'bboxes': gt_bbox, 'hierarchy_encoding': encoding}
+        d = {'frames': frames, 'bboxes': gt_bbox, 
+             'noun_label': self.noun_dict[sample_dict['noun_class']], 
+             'hierarchy_encoding': encoding}
         if self.transform is not None:
             d = self.transform(d)
-
         return d  
         
 
@@ -116,7 +126,7 @@ if __name__=='__main__':
     dataset_path = '/vision/group/EPIC-KITCHENS/'
     annotations_foldername = 'annotations'
     annotations_folderpath = os.path.join(dataset_path, annotations_foldername)
-    visual_dataset_path = os.path.join(dataset_path, 'EPIC_KITCHENS_2018')
+    visual_dataset_path = os.path.join(dataset_path, 'EPIC_KITCHENS_2018.Bingbin')
     visual_images_foldername = 'object_detection_images'
     visual_images_folderpath = os.path.join(visual_dataset_path, visual_images_foldername)
 
@@ -133,11 +143,11 @@ if __name__=='__main__':
     assert os.path.exists(train_object_csvpath), "{} does not exist".format(train_object_csvpath)
     assert os.path.exists(visual_images_folderpath), "{} does not exist".format(visual_images_folderpath)
     assert os.path.exists(class_key_csvpath), "{} does not exist".format(class_key_csvpath)
-
+        
+    image_data_folder = os.path.join(visual_images_folderpath, 'train')
     knowns = ['pan', 'onion'] 
     unknowns = ['plate', 'meat']
     DF = EK_Dataset(knowns, unknowns, 
-            train_object_csvpath, train_action_csvpath, class_key_csvpath)
-    
-    import ipdb; ipdb.set_trace() 
-    print(DF[4])
+            train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
+
+    print(DF[2])

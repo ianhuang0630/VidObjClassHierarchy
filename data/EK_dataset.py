@@ -14,6 +14,10 @@ import pickle
 # and one instance of the unknown dataset is present. Other formats of this 
 # dataset will be available according to other settings of parameters.
 
+DEBUG=True
+if DEBUG:
+    random.seed(7)
+
 class DatasetFactory(object):
     def __init__(self, knowns, unknowns, object_data_path, action_data_path,
             class_key_path, cache_folder='dataset_cache/', options='separate',
@@ -234,11 +238,11 @@ class DatasetFactory(object):
         else:
             raise ValueError('{} is not a valid objection for search_target.'.format(search_target))
         
-        all_frame_bounding_boxes = {}
+        frame_to_bounding_boxes = {}
         for video in video_candidates[search_target]:
-            video_id = video[0]
-            participant_id = video[1]
-            
+            participant_id = video[0]
+            video_id = video[1]
+            # import ipdb; ipdb.set_trace() 
             # helpful datastructures 
             states_dict = {element: 'off' for element in set_of_interest}
             stacks_dict = {element: [] for element in set_of_interest} 
@@ -246,15 +250,14 @@ class DatasetFactory(object):
             
             # now proceed to find the clips.
             frames_and_classes = []
-            frame_to_bounding_boxes = {}
             frame_index = 0
             for index, row  in sorted_video.iterrows():
                 if row['frame'] not in frame_to_bounding_boxes:
-                    frame_to_bounding_boxes[int(row['frame'])] = \
+                    frame_to_bounding_boxes[str(participant_id)+'/'+str(video_id)+'/'+str(row['frame'])] = \
                             [{'noun_class':row['noun_class'], 
                                 'bbox':row['bounding_boxes']}]
                 else:
-                    frame_to_bounding_boxes[int(row['frame'])].append(
+                    frame_to_bounding_boxes[str(participant_id)+'/'+str(video_id)+'/'+str(row['frame'])].append(
                             {'noun_class': row['noun_class'], 
                                 'bbox': row['bounding_boxes']}
                             )
@@ -269,23 +272,39 @@ class DatasetFactory(object):
                         frames_and_classes[-1].append(row['noun_class'])
                 else:
                     raise ValueError("current frame is {} but frame_index is {}".format(row['frame'], frame_index))
-            all_frame_to_bounding_boxes[(participant_id, video_id)] = frame_to_bounding_boxes 
+            #all_frame_to_bounding_boxes[(participant_id, video_id)] = frame_to_bounding_boxes 
+            previous_frame = None
             for idx, element in enumerate(tqdm(frames_and_classes)):
                 for class_ in states_dict:
-                    if class_ in element[1:] and states_dict[class_] == 'off':
-                        stacks_dict[class_].append(element[0])
-                        states_dict[class_] = 'on'
-                    if (class_ not in element[1:] and states_dict[class_] == 'on') or (idx == len(frames_and_classes)-1 and states_dict[class_]=='on'):
-                        end_frame = frames_and_classes[idx-1][0]
-                        start_frame = stacks_dict[class_].pop()
-                        states_dict[class_] = 'off'
-                        dataset.append({'video_id': video_id,
-                                        'participant_id': participant_id,
-                                        'start_frame': start_frame,
-                                        'end_frame': end_frame,
-                                        'noun_class': class_})
-             
-        return dataset, all_frame_to_bounding_boxes 
+                    # if new frame isn't 30 from the previous, 
+                    if idx!= 0 and (element[0] - previous_frame == 30):
+                        if class_ in element[1:] and states_dict[class_] == 'off':
+                            stacks_dict[class_].append(element[0]) # element[0] is the frame number ..
+                            states_dict[class_] = 'on'
+                            juststarted = True
+                        if (class_ not in element[1:] and states_dict[class_] == 'on') \
+                            or (idx == len(frames_and_classes)-1 and states_dict[class_]=='on'):
+                            end_frame = frames_and_classes[idx-1][0]
+                            start_frame = stacks_dict[class_].pop()
+                            states_dict[class_] = 'off'
+                            dataset.append({'video_id': video_id,
+                                            'participant_id': participant_id,
+                                            'start_frame': start_frame,
+                                            'end_frame': end_frame,
+                                            'noun_class': class_})
+                    else:
+                        if states_dict[class_] == 'on':
+                            end_frame = frames_and_classes[idx-1][0]
+                            start_frame = stacks_dict[class_].pop()
+                            states_dict[class_] = 'off'
+                            dataset.append({'video_id': video_id,
+                                            'participant_id': participant_id,
+                                            'start_frame': start_frame,
+                                            'end_frame': end_frame,
+                                            'noun_class': class_})
+                previous_frame = element[0]
+
+        return dataset, frame_to_bounding_boxes 
     
     def organize_known(self, video_candidates):
         dataset = []
@@ -303,10 +322,6 @@ class DatasetFactory(object):
         return dataset 
 
     def window_search_coexistence(self):
-        pass
-
-    def get_dataset(self):
-        # TODO
         pass
 
 if __name__=='__main__':

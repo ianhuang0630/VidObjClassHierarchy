@@ -68,8 +68,8 @@ def survey_tree(known_classes, tree_file='hierarchyV1.json'):
             for layer3_class in subsubhierarchy:
                 if layer3_class in known_classes_set:
                     counter3 += 1
+            map_[(counter1, counter2)] = (counter3, (layer1_class, layer2_class)) # number for the unknown class in this category
             counter2 += 1
-            map_[(counter1, counter2)] = counter3 # number for the unknown class in this category
         counter1 += 1
     return map_ 
 
