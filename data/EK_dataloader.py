@@ -36,6 +36,11 @@ class EK_Dataset(Dataset):
         self.knowns = knowns
         self.unknowns = unknowns
         self.transform = transform
+        self.class_key_df = pd.read_csv(class_key_path) 
+        # TODO: using the key, convert strings into unkowns
+        self.class_key_dict = dict(zip(self.class_key_df.class_key, self.class_key_df.noun_id))
+        self.noun_dict = dict(zip(self.class_key_df.noun_id, self.class_key_df.class_key))
+
         super(EK_Dataset, self).__init__()
         self.DF = DatasetFactory(knowns, unknowns, 
                     object_data_path, action_data_path, class_key_path)        
@@ -84,11 +89,13 @@ class EK_Dataset(Dataset):
             # loading this frame
             file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(a))[-10:]+'.jpg'
             image_path = os.path.join(self.image_data_folder, file_path)
-            frames.append(cv2.imread(image_path))
             try:
                 bboxes = self.f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
-            except:
-                import ipdb; ipdb.set_trace()
+            except KeyError:
+                a += 30
+                # print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
+                continue # this would ignore all the cases where the bounding box doesn't exist
+            frames.append(cv2.imread(image_path))
             valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
             if len(valid_candidates)==0 or valid_candidates[0] == '[]':
                 gt_bbox.append(np.array([0,0,0,0]))
@@ -100,18 +107,17 @@ class EK_Dataset(Dataset):
         frames = np.stack(frames, axis=3) # T x W x H x C
         gt_bbox = np.stack(frames, axis=1)  # T x 4
         # get position in the tree
-        
-        encoding = get_tree_position(sample_dict['noun_class'], self.knowns) 
+        encoding = get_tree_position(self.noun_dict[sample_dict['noun_class']], self.knowns) 
         if encoding is None:
-            top_levels = tuple(get_tree_position(sample_dict['noun_class'], self.unknowns)[:-1])  
+            top_levels = tuple(get_tree_position(self.noun_dict[sample_dict['noun_class']], self.unknowns)[:-1])  
             assert top_levels in self.unknown_lowest_level_label
-            encoding = np.array(list(top_levels)+[self.unknown_lowest_level_label[top_levels]])
-       
+            encoding = np.array(list(top_levels)+[self.unknown_lowest_level_label[top_levels][0]])
         
-        d = {'frames': frames, 'bboxes': gt_bbox, 'hierarchy_encoding': encoding}
+        d = {'frames': frames, 'bboxes': gt_bbox, 
+             'noun_label': self.noun_dict[sample_dict['noun_class']], 
+             'hierarchy_encoding': encoding}
         if self.transform is not None:
             d = self.transform(d)
-
         return d  
         
 
@@ -143,5 +149,5 @@ if __name__=='__main__':
     unknowns = ['plate', 'meat']
     DF = EK_Dataset(knowns, unknowns, 
             train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
-    
-    print(DF[4])
+
+    print(DF[2])
