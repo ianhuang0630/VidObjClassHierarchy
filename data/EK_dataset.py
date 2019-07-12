@@ -234,7 +234,7 @@ class DatasetFactory(object):
         else:
             raise ValueError('{} is not a valid objection for search_target.'.format(search_target))
         
-        all_frame_bounding_boxes = {}
+        frame_to_bounding_boxes = {}
         for video in video_candidates[search_target]:
             video_id = video[0]
             participant_id = video[1]
@@ -246,15 +246,14 @@ class DatasetFactory(object):
             
             # now proceed to find the clips.
             frames_and_classes = []
-            frame_to_bounding_boxes = {}
             frame_index = 0
             for index, row  in sorted_video.iterrows():
                 if row['frame'] not in frame_to_bounding_boxes:
-                    frame_to_bounding_boxes[int(row['frame'])] = \
+                    frame_to_bounding_boxes[str(participant_id)+'/'+str(video_id)+'/'+str(row['frame'])] = \
                             [{'noun_class':row['noun_class'], 
                                 'bbox':row['bounding_boxes']}]
                 else:
-                    frame_to_bounding_boxes[int(row['frame'])].append(
+                    frame_to_bounding_boxes[str(participant_id)+'/'+str(video_id)+'/'+str(row['frame'])].append(
                             {'noun_class': row['noun_class'], 
                                 'bbox': row['bounding_boxes']}
                             )
@@ -269,7 +268,7 @@ class DatasetFactory(object):
                         frames_and_classes[-1].append(row['noun_class'])
                 else:
                     raise ValueError("current frame is {} but frame_index is {}".format(row['frame'], frame_index))
-            all_frame_to_bounding_boxes[(participant_id, video_id)] = frame_to_bounding_boxes 
+            #all_frame_to_bounding_boxes[(participant_id, video_id)] = frame_to_bounding_boxes 
             for idx, element in enumerate(tqdm(frames_and_classes)):
                 for class_ in states_dict:
                     if class_ in element[1:] and states_dict[class_] == 'off':
@@ -285,7 +284,7 @@ class DatasetFactory(object):
                                         'end_frame': end_frame,
                                         'noun_class': class_})
              
-        return dataset, all_frame_to_bounding_boxes 
+        return dataset, frame_to_bounding_boxes 
     
     def organize_known(self, video_candidates):
         dataset = []
@@ -303,10 +302,6 @@ class DatasetFactory(object):
         return dataset 
 
     def window_search_coexistence(self):
-        pass
-
-    def get_dataset(self):
-        # TODO
         pass
 
 if __name__=='__main__':
