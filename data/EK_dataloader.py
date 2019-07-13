@@ -49,6 +49,9 @@ class EK_Dataset_pretrain(Dataset):
         assert 'unknown_frame2bbox' in self.dataset \
                 and 'known_frame2bbox' in self.dataset, 'frame2bbox conversion not found'
         self.training_data = self.dataset['known_pretrain']
+        for idx, sample in enumerate(self.training_data):
+            if not filter_function(sample):
+                self.training_data.pop(idx)
         self.f2bbox = self.dataset['known_frame2bbox']
 
     def __len__(self):
@@ -76,14 +79,15 @@ class EK_Dataset_pretrain(Dataset):
             image = cv2.imread(image_path)
             valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
             if len(valid_candidates)==0 or valid_candidates[0] == '[]':
-                gt_bbox.append(np.array([0,0,0,0]))
+                a+=30
+                continue
             else:
                 this_bbox = np.array(ast.literal_eval(valid_candidates[0]['bbox']))
                 # crop gt_bbox
-                y, x, yd, xd = this_bbox[0][0]
+                y, x, yd, xd = this_bbox[0]
                 image_black = np.zeros_like(image) 
-                image_black[y, x, y+yd, x+xd] = image[y, x, y+yd, x+xd]
-                frame.append(image_black)
+                image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
+                frames.append(image_black)
             a += 30
         frames = np.stack(frames, axis=3) # T x W x H x C
         # get position in the tree
@@ -234,4 +238,4 @@ if __name__=='__main__':
         
     DF_pretrain = EK_Dataset_pretrain(knowns, unknowns, 
             train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
-    DF_pretrain[2]
+    print(DF_pretrain[30])
