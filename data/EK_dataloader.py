@@ -11,8 +11,8 @@ import cv2
 import os
 import ast
 
-from gt_hierarchy import *
-from EK_dataset import DatasetFactory
+from data.gt_hierarchy import *
+from data.EK_dataset import DatasetFactory
 
 DEBUG = True
 

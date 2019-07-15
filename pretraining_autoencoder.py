@@ -13,7 +13,7 @@ from torch.utils import data
 import torch.optim as optim
 
 from src.tree_encoder import *
-from data.EK_dataloader import EK_Dataset
+from data.EK_dataloader import EK_Dataset, EK_Dataset_pretrain
 from data.gt_hierarchy import *
 # dataloaders
 
@@ -61,7 +61,7 @@ if __name__=='__main__':
     split = get_known_unknown_split()
     knowns = split['training_known']
     unknowns = split['training_unknown']
-
+    import ipdb; ipdb.set_trace()
     # instantiating the dataloader
     DF = EK_Dataset_pretrain(knowns, unknowns,
             train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)

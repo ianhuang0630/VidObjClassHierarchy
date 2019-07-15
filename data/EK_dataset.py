@@ -125,8 +125,9 @@ class DatasetFactory(object):
             else:
                 knowns[sample['noun_class']].append(sample)
         
-        assert all([len(knowns[key]) >=2  for key in knowns])
-        
+        # below is a very stringent, and if it happens that there exists a key that
+        # assert all([len(knowns[key]) >=2  for key in knowns])
+         
         known_pretrain = []
         known_train = []
         # splitting 80-20 training-pretraining
