@@ -1,8 +1,10 @@
 """
 Implementation of the encoder for the the hierarchy
 """
+import torch
 import torch.nn as nn
 from torch.autograd import Variable
+import numpy as np
 
 class TreeEncoder(nn.Module):
     def __init__(self):
@@ -19,6 +21,11 @@ class C3D(nn.Module):
 
     def __init__(self, input_shape, embedding_dim=40):
         super(C3D, self).__init__()
+        import ipdb; ipdb.set_trace()
+        self.dropout = nn.Dropout(p=0.5)
+        self.relu = nn.ReLU()
+        self.softmax = nn.Softmax()
+
 
         self.conv1 = nn.Conv3d(3, 64, kernel_size=(3, 3, 3), padding=(1, 1, 1))
         self.pool1 = nn.MaxPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2))
@@ -43,12 +50,7 @@ class C3D(nn.Module):
 
         self.fc6 = nn.Linear(self.flat_shape, 4096)
         self.fc7 = nn.Linear(4096, 4096)
-        self.fc8 = nn.Linear(4096, embedding_dimension)
-
-        self.dropout = nn.Dropout(p=0.5)
-
-        self.relu = nn.ReLU()
-        self.softmax = nn.Softmax()
+        self.fc8 = nn.Linear(4096, embedding_dim)
 
     def get_flat_fts(self, in_shape, fts):
         f = fts(Variable(torch.ones(1,*in_shape)))

@@ -82,5 +82,5 @@ if __name__=='__main__':
     train_dataloader = data.DataLoader(DF, batch_size=8, num_workers=8)
 
     # model instatntiation and training
-    model = C3D(input_shape=(200,200), embedding_dim=40) # TODO: replace these
+    model = C3D(input_shape=(3, 20 , 20, 10), embedding_dim=40) # TODO: replace these
     pretrain(model, dataloader, num_epochs=10)
