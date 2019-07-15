@@ -19,23 +19,30 @@ from data.gt_hierarchy import *
 
 DEBUG = True
 
-def pretrain(net, dataloader, num_epochs=10, save_interval=50):
-    # TODO define cost
-    criterion = L2() # TODO fix
-    # TODO optimizer
+def pretrain(net, dataloader, num_epochs=10, save_interval=5, model_saveloc='models/'):
+    if not os.path.exists(model_saveloc):
+        os.makedirs(model_saveloc)
+    # define cost
+    criterion = nn.MSELoss() 
+    # optimizer
     opitmizer = torch.optim.SGD(net.parameters(), 0.01)
     # TODO iterate through the dataset, 10 epochs
     for epoch in range(num_epochs):
         for i, sample in enumerate(dataloader):
             frames = sample['frames']
             encoding = sample['hierarchy_encoding']
+            import ipdb; ipdb.set_trace()
 
             pred_encoding = net(frames)
             loss = criterion(pred_encoding, encoding)
             loss.backward()
-            if i % save_interval == 0:
-                print('current loss: {}'.format(str(loss)))
             optimizer.step()
+
+        if epoch % save_interval == 0:
+            print('current loss: {}'.format(str(loss)))
+            # saving to the location
+            torch.save(net, os.path.join(model_saveloc, 
+                                        'net_epoch{}.pth'.format(epoch)))
 
     return net
 
@@ -75,7 +82,6 @@ if __name__=='__main__':
         split = get_known_unknown_split()
     knowns = split['training_known']
     unknowns = split['training_unknown']
-    import ipdb; ipdb.set_trace()
     # instantiating the dataloader
     DF = EK_Dataset_pretrain(knowns, unknowns,
             train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)

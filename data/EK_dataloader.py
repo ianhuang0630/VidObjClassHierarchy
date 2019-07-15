@@ -19,12 +19,6 @@ DEBUG = True
 if DEBUG:
     random.seed(7)
 
-def resize_transform(d):
-    assert 'frames' in d, 'need "frames" in d'
-    new_d = d.copy()
-    # TODO
-    new_d['frames'] = cv2.resize()
-    return new_d
 
 def default_filter_function(d):
     # filters out the ones where there are too few frames present
