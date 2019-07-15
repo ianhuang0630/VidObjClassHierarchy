@@ -67,10 +67,17 @@ class DatasetFactory(object):
         if all([type(element) is str for element in self.unknown_classes]):
             self.unknown_classes = [class_key_dict[element] for element in self.unknown_classes]
 
-        self.cache_filename = 'known_'+'_'.join([str(element) for element in sorted(self.unknown_classes)]) \
-                    +'_unknown_'+'_'.join([str(element) for element in sorted(self.known_classes)]) +'.json'
-        self.config_filename = 'config_known_'+'_'.join([str(element) for element in sorted(self.unknown_classes)]) \
-                    +'_unknown_'+'_'.join([str(element) for element in sorted(self.known_classes)]) +'.pkl'
+
+        # listing all available files
+        config_pkls = os.listdir(self.cache_folder)
+        assert len(config_pkls)%2==0, 'missing files in the config folder {}'.format(self.cache_folder)
+        version_number = len(config_pkls)%2 + 1 
+
+        self.cache_filename = 'data_version{}.json'.format(version_number)
+        self.config_filename = 'config_version{}.json'.format(version_number)
+
+        #'config_known_'+'_'.join([str(element) for element in sorted(self.unknown_classes)]) \
+        # +'_unknown_'+'_'.join([str(element) for element in sorted(self.known_classes)]) +'.pkl'
         self.config = {'known_classes': self.known_classes,
                 'unknown_classses': self.unknown_classes,
                 'object_csv': self.object_data_path,
@@ -83,10 +90,11 @@ class DatasetFactory(object):
 
         self.options = options
         # first search the cache folder
-        if self.found_in_cache() and not self.overwrite:
+        cache_return = self.found_in_cache()
+        if cache_return is not None and not self.overwrite:
             # loading cache
             print('Exact requirements found in cache, loading from cache folder...')
-            self.final_dataset = self.load_cache()
+            self.final_dataset = self.load_cache(cache_return)
             print('Done.')
         else:
             # if not in cache folder, call self.construct_dataset()
@@ -149,16 +157,31 @@ class DatasetFactory(object):
         pass
 
     def found_in_cache(self):
-        # TODO
-        if os.path.exists(os.path.join(self.cache_folder, self.config_filename)):
-            with open(os.path.join(self.cache_folder, self.config_filename), 'rb') as f:
-                return self.config == pickle.load(f) \
-                        and os.path.exists(os.path.join(self.cache_folder, self.cache_filename))
-        else:
-            return False
 
-    def load_cache(self):
-        with open(os.path.join(self.cache_folder, self.cache_filename), 'r') as f:
+        files = os.listdir(self.cache_Folder)
+        config_files = [filename[-4:] == '.pkl' for filename in files]
+        
+        for config_file in config_files:
+            with open(config_file, 'rb') as f:
+                candidate = pickle.load(f)
+            if set(candidate['known_classes']) == set(self.known_classes) \
+                and set(candidate['unknown_classes']) == set(self.unknown_classes):
+                
+                return int(config_file[len('config_'):-len('.pkl')])
+
+        return None 
+
+        # # TODO
+        # if os.path.exists(os.path.join(self.cache_folder, self.config_filename)):
+        #     with open(os.path.join(self.cache_folder, self.config_filename), 'rb') as f:
+        #         return self.config == pickle.load(f) \
+        #                 and os.path.exists(os.path.join(self.cache_folder, self.cache_filename))
+        # else:
+        #     return False
+
+    def load_cache(self, version_number):
+        cache_filename = 'data_version{}.json'.format(version_number)
+        with open(os.path.join(self.cache_folder, cache_filename), 'r') as f:
             return json.load(f)
          
     def construct_dataset(self):
