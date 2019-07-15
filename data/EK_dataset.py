@@ -74,7 +74,7 @@ class DatasetFactory(object):
         version_number = len(config_pkls)%2 + 1 
 
         self.cache_filename = 'data_version{}.json'.format(version_number)
-        self.config_filename = 'config_version{}.json'.format(version_number)
+        self.config_filename = 'config_version{}.pkl'.format(version_number)
 
         #'config_known_'+'_'.join([str(element) for element in sorted(self.unknown_classes)]) \
         # +'_unknown_'+'_'.join([str(element) for element in sorted(self.known_classes)]) +'.pkl'
@@ -158,7 +158,7 @@ class DatasetFactory(object):
 
     def found_in_cache(self):
 
-        files = os.listdir(self.cache_Folder)
+        files = os.listdir(self.cache_folder)
         config_files = [filename[-4:] == '.pkl' for filename in files]
         
         for config_file in config_files:

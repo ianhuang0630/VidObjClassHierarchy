@@ -128,7 +128,7 @@ def get_known_unknown_split(tree_file='hierarchyV1.json'):
             layer2_class = list(layer2_subhierarchy.keys())[0]
             subsubhierarchy = layer2_subhierarchy[layer2_class]
             this_branch_candidates = []
-            for layer3_class in subhierarchy:
+            for layer3_class in subsubhierarchy:
                 this_branch_candidates.append(layer3_class)
             random.shuffle(this_branch_candidates)
             # splitting into three even groups, in the following pirority order:
@@ -140,11 +140,11 @@ def get_known_unknown_split(tree_file='hierarchyV1.json'):
             testing_unknown = this_branch_candidates [a:2*a]
             testing_unknowns.extend(testing_unknown)
             training_unknown = this_branch_candidates [2*a:]
-            training_unknown.extend(training_unknown)
+            training_unknowns.extend(training_unknown)
 
     return {'training_unknown': training_unknowns,
             'training_known': training_knowns,
-            'testing_known': testing_knowns}
+            'testing_unknown': testing_unknowns}
 
 if __name__=='__main__':
     print('distance between ONION and PEACH is {}'.\

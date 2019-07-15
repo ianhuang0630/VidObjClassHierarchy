@@ -2,6 +2,7 @@
 Implementation of the encoder for the the hierarchy
 """
 import torch.nn as nn
+from torch.autograd import Variable
 
 class TreeEncoder(nn.Module):
     def __init__(self):
