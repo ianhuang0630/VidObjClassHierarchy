@@ -7,7 +7,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import pickle
 
 from torch.utils import data
 import torch.optim as optim
@@ -70,7 +70,7 @@ if __name__=='__main__':
         else:
             # loading from the file
             with open('current_split.pkl', 'rb') as f:
-                split = pickle.load()
+                split = pickle.load(f)
     else:
         split = get_known_unknown_split()
     knowns = split['training_known']
