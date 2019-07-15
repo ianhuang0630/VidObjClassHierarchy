@@ -71,7 +71,7 @@ class DatasetFactory(object):
         # listing all available files
         config_pkls = os.listdir(self.cache_folder)
         assert len(config_pkls)%2==0, 'missing files in the config folder {}'.format(self.cache_folder)
-        version_number = len(config_pkls)%2 + 1 
+        version_number = len(config_pkls)/2 + 1 
 
         self.cache_filename = 'data_version{}.json'.format(version_number)
         self.config_filename = 'config_version{}.pkl'.format(version_number)
@@ -159,10 +159,10 @@ class DatasetFactory(object):
     def found_in_cache(self):
 
         files = os.listdir(self.cache_folder)
-        config_files = [filename[-4:] == '.pkl' for filename in files]
+        config_files = [filename for filename in files if filename [-4:] == '.pkl']
         
         for config_file in config_files:
-            with open(config_file, 'rb') as f:
+            with open(os.path.join(self.cache_folder, fconfig_file), 'rb') as f:
                 candidate = pickle.load(f)
             if set(candidate['known_classes']) == set(self.known_classes) \
                 and set(candidate['unknown_classes']) == set(self.unknown_classes):
