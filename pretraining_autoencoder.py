@@ -17,6 +17,8 @@ from data.EK_dataloader import EK_Dataset, EK_Dataset_pretrain
 from data.gt_hierarchy import *
 # dataloaders
 
+DEBUG = True
+
 def pretrain(net, dataloader, num_epochs=10, save_interval=50):
     # TODO define cost
     criterion = L2() # TODO fix
@@ -58,10 +60,22 @@ if __name__=='__main__':
     image_data_folder = os.path.join(visual_images_folderpath, 'train')
 
     # splitting known and unknown data
-    split = get_known_unknown_split()
+    if DEBUG:
+        if not os.path.exists('current_split.pkl'):
+            split = get_known_unknown_split()
+            # saving into 'current_split.pkl'
+            with open('current_split.pkl', 'wb') as f:
+                pickle.dump(split, f)
+
+        else:
+            # loading from the file
+            with open('current_split.pkl', 'rb') as f:
+                split = pickle.load()
+    else:
+        split = get_known_unknown_split()
     knowns = split['training_known']
     unknowns = split['training_unknown']
-    import ipdb; ipdb.set_trace()
+
     # instantiating the dataloader
     DF = EK_Dataset_pretrain(knowns, unknowns,
             train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
