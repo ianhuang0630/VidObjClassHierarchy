@@ -19,6 +19,13 @@ DEBUG = True
 if DEBUG:
     random.seed(7)
 
+def resize_transform(d):
+    assert 'frames' in d, 'need "frames" in d'
+    new_d = d.copy()
+    # TODO 
+    new_d['frames'] = cv2.resize() 
+    return new_d
+
 def default_filter_function(d):
     # filters out the ones where there are too few frames present
     return (d['end_frame'] - d['start_frame'])/30 > 10
@@ -103,7 +110,6 @@ class EK_Dataset_pretrain(Dataset):
         if self.transform is not None:
             d = self.transform(d)
         return d  
-        
  
 
 class EK_Dataset(Dataset):
