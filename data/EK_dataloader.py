@@ -32,7 +32,7 @@ def default_filter_function(d):
 
 def blackout_crop(start_Frame, end_frame, participant_id, video_id, f2bbox):
     # caching into a massive pickle file
- while a < end_frame:
+    while a < end_frame:
                 # loading this frame
                 file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(a))[-10:]+'.jpg'
                 image_path = os.path.join(self.image_data_folder, file_path)
