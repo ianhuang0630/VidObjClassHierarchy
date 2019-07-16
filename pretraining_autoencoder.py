@@ -22,20 +22,30 @@ from data.transforms import *
 # dataloaders
 
 DEBUG = True
+USECUDA = True
 
-def pretrain(net, dataloader, num_epochs=10, save_interval=5, model_saveloc='models/'):
+def pretrain(net, dataloader, num_epochs=10, save_interval=5, model_saveloc='models/pretraining_single s'):
     if not os.path.exists(model_saveloc):
         os.makedirs(model_saveloc)
     # define cost
     criterion = nn.MSELoss() 
     # optimizer
     opitmizer = torch.optim.SGD(net.parameters(), 0.01)
+
+    # TODO moving types onto GPU
+    if USECUDA:
+        net = net.cuda()
+        
     # TODO iterate through the dataset, 10 epochs
     for epoch in range(num_epochs):
-        for i, sample in enumerate(dataloader):
+        print('training for epoch {}'.format(epoch))
+        for i, sample in tqdm(enumerate(dataloader)),:
             import ipdb; ipdb.set_trace()
             frames = sample['frames']
             encoding = sample['hierarchy_encoding']
+            if USECUDA:
+                frames = frames.cuda()
+                encoding = encoding.cuda()
 
             pred_encoding = net(frames)
             loss = criterion(pred_encoding, encoding)
