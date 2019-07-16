@@ -18,11 +18,117 @@ DEBUG = True
 
 if DEBUG:
     random.seed(7)
+    np.random.seed(7)
 
 
 def default_filter_function(d):
     # filters out the ones where there are too few frames present
     return (d['end_frame'] - d['start_frame'])/30 > 10
+
+class EK_Dataset_pretrain_pairwise(Dataset):
+    def __init__(self, knowns, unknowns,
+            object_data_path,
+            action_data_path,
+            class_key_path,
+            image_data_folder,
+            num_samples=10000,
+            filter_function = default_filter_function,
+            transform=None):
+        # purpose of the dataset object: either for pretraining or for training/testing
+        super(EK_Dataset_pretrain, self).__init__()
+        self.image_data_folder = image_data_folder
+        self.knowns = knowns
+        self.unknowns = unknowns
+        self.transform = transform
+        self.num_samples = num_smaples
+        self.class_key_df = pd.read_csv(class_key_path)
+        # TODO: using the key, convert strings into unkowns
+        self.class_key_dict = dict(zip(self.class_key_df.class_key, self.class_key_df.noun_id))
+        self.noun_dict = dict(zip(self.class_key_df.noun_id, self.class_key_df.class_key))
+
+        self.DF = DatasetFactory(knowns, unknowns,
+                    object_data_path, action_data_path, class_key_path)
+
+        self.dataset = self.DF.get_dataset()
+        assert 'unknown_frame2bbox' in self.dataset \
+                and 'known_frame2bbox' in self.dataset, 'frame2bbox conversion not found'
+        self.training_data = self.dataset['known_pretrain']
+        buffer_ = []
+        for idx, sample in enumerate(self.training_data):
+            if filter_function(sample):
+                buffer_.append(sample)
+        self.training_data = buffer_
+        del buffer_
+        self.f2bbox = self.dataset['known_frame2bbox']
+
+        # naive sampling of pairwise
+        self.rand_selection_indices = []
+        for i in range(num_samples):
+            selection_indices = list(np.random.choice(len(self.training_data), 2))
+            self.rand_selection_indices.append(selection_indices)
+
+    def __getitem__(self, idx):
+        sample_a = self.training_data[self.rand_selection_indices[idx][0]]
+        sample_b = self.training_data[self.rand_selection_indices[idx][1]]
+
+        indiv_output_d = []
+        for sample_dict in [sample_a, sample_b]:
+            video_id = sample_dict['video_id']
+            participant_id = sample_dict['participant_id']
+            start_frame = sample_dict['start_frame']
+            end_frame = sample_dict['end_frame']
+
+            a = start_frame
+            frames = []
+            while a < end_frame:
+                # loading this frame
+                file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(a))[-10:]+'.jpg'
+                image_path = os.path.join(self.image_data_folder, file_path)
+                try:
+                    bboxes = self.f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
+                except KeyError:
+                    a += 30
+                    print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
+                    continue # this would ignore all the cases where the bounding box doesn't exist
+                image = cv2.imread(image_path)
+                valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
+                if len(valid_candidates)==0 or valid_candidates[0] == '[]':
+                    a+=30
+                    continue
+                else:
+                    this_bbox = np.array(ast.literal_eval(valid_candidates[0]['bbox']))
+                    # crop gt_bbox
+                    y, x, yd, xd = this_bbox[0]
+                    image_black = np.zeros_like(image)
+                    image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
+                    frames.append(image_black)
+                a += 30
+            frames = np.stack(frames, axis=3) # T x W x H x C # TODO: reshape needed?
+            # get position in the tree
+            encoding = get_tree_position(self.noun_dict[sample_dict['noun_class']], self.knowns)
+            if encoding is None:
+                top_levels = tuple(get_tree_position(self.noun_dict[sample_dict['noun_class']], self.unknowns)[:-1])
+                assert top_levels in self.unknown_lowest_level_label
+                encoding = np.array(list(top_levels)+[self.unknown_lowest_level_label[top_levels][0]])
+
+            d = {'frames': frames,
+                 'noun_label': self.noun_dict[sample_dict['noun_class']],
+                 'hierarchy_encoding': encoding}
+
+            indiv_output_d.append(d)
+        # get distance bretween the two noun classes
+        pairwise_tree_dist = get_tree_distance(indiv_output_d[0]['noun_label'],
+                                            indiv_output_d[1]['noun_label'])
+
+        output = {'frames_a': indiv_output_d[0]['frames'],
+                    'frames_b':indiv_output_d[1]['frames'],
+                    'noun_label_a': indiv_output_d[0]['noun_label'],
+                    'noun_label_b': indiv_output_d[1]['noun_label'],
+                    'dist': pairwise_tree_dist}
+        if self.transform is not None:
+            return self.transform(output)
+
+        return output
 
 class EK_Dataset_pretrain(Dataset):
     def __init__(self, knowns, unknowns,
