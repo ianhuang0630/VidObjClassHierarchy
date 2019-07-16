@@ -108,7 +108,7 @@ if __name__=='__main__':
     DF = EK_Dataset_pretrain(knowns, unknowns,
             train_object_csvpath, train_action_csvpath, 
             class_key_csvpath, image_data_folder, transform=composed_trans) 
-    train_dataloader = data.DataLoader(DF, batch_size=4, num_workers=2)
+    train_dataloader = data.DataLoader(DF, batch_size=4, num_workers=0)
                             
     # model instatntiation and training
     model = C3D(input_shape=(3, 10, 20 , 20), embedding_dim=3) # TODO: replace these
