@@ -80,7 +80,7 @@ class C3D(nn.Module):
 
         h = self.convs(x)
 
-        h = h.view(-1, 8192)
+        h = h.view(-1, self.flat_shape)
         h = self.relu(self.fc6(h))
         h = self.dropout(h)
         h = self.relu(self.fc7(h))

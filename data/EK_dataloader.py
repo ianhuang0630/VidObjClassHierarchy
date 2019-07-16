@@ -10,9 +10,14 @@ import pandas as pd
 import cv2
 import os
 import ast
+import pickle
 
-from data.gt_hierarchy import *
-from data.EK_dataset import DatasetFactory
+try:
+    from gt_hierarchy import *
+    from EK_dataset import DatasetFactory
+except: 
+    from data.gt_hierarchy import *
+    from data.EK_dataset import DatasetFactory
 
 DEBUG = True
 
@@ -98,6 +103,9 @@ class EK_Dataset_pretrain_pairwise(Dataset):
                 else:
                     this_bbox = np.array(ast.literal_eval(valid_candidates[0]['bbox']))
                     # crop gt_bbox
+                    if len(this_bbox) == 0:
+                        a += 30
+                        continue
                     y, x, yd, xd = this_bbox[0]
                     image_black = np.zeros_like(image)
                     image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
@@ -194,6 +202,9 @@ class EK_Dataset_pretrain(Dataset):
             else:
                 this_bbox = np.array(ast.literal_eval(valid_candidates[0]['bbox']))
                 # crop gt_bbox
+                if len(this_bbox) == 0: 
+                    a += 30
+                    continue
                 y, x, yd, xd = this_bbox[0]
                 image_black = np.zeros_like(image)
                 image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
@@ -295,7 +306,9 @@ class EK_Dataset(Dataset):
             frames.append(cv2.imread(image_path))
             valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
             if len(valid_candidates)==0 or valid_candidates[0] == '[]':
-                gt_bbox.append(np.array([0,0,0,0]))
+                # gt_bbox.append(np.array([0,0,0,0]))
+                a+= 30
+                continue # ignoring all cases where bounding boxes are empty
             else:
                 # parse valid_candidates into array
                 # TODO
@@ -342,12 +355,24 @@ if __name__=='__main__':
     assert os.path.exists(class_key_csvpath), "{} does not exist".format(class_key_csvpath)
 
     image_data_folder = os.path.join(visual_images_folderpath, 'train')
-    knowns = ['pan', 'onion']
-    unknowns = ['plate', 'meat']
-    DF = EK_Dataset(knowns, unknowns,
-            train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
+    
+    # DF = EK_Dataset(knowns, unknowns,
+    #         train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
     # print(DF[2])
+    
+    with open('current_split.pkl','rb') as f:
+        split = pickle.load(f)
+    knowns = split['training_known']
+    unknowns = split['training_unknown']
 
     DF_pretrain = EK_Dataset_pretrain(knowns, unknowns,
             train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
-    print(DF_pretrain[30])
+    #print(DF_pretrain[16])
+    #print(DF_pretrain[17])
+    #print(DF_pretrain[18])
+    #print(DF_pretrain[19])
+    #print(DF_pretrain[20])
+    print(DF_pretrain[21])
+    print(DF_pretrain[22])
+    print(DF_pretrain[23])
+

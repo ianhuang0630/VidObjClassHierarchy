@@ -18,19 +18,21 @@ from data.EK_dataloader import EK_Dataset, EK_Dataset_pretrain
 from data.gt_hierarchy import *
 from data.transforms import *
 
+from tqdm import tqdm
 
 # dataloaders
 
 DEBUG = True
-USECUDA = True
+USECUDA = True 
 
-def pretrain(net, dataloader, num_epochs=10, save_interval=5, model_saveloc='models/pretraining_single s'):
+def pretrain(net, dataloader, num_epochs=10, save_interval=5, 
+        model_saveloc='models/pretraining_single'):
     if not os.path.exists(model_saveloc):
         os.makedirs(model_saveloc)
     # define cost
     criterion = nn.MSELoss() 
     # optimizer
-    opitmizer = torch.optim.SGD(net.parameters(), 0.01)
+    optimizer = torch.optim.SGD(net.parameters(), 0.01)
 
     # TODO moving types onto GPU
     if USECUDA:
@@ -38,15 +40,16 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=5, model_saveloc='mod
         
     # TODO iterate through the dataset, 10 epochs
     for epoch in range(num_epochs):
-        print('training for epoch {}'.format(epoch))
-        for i, sample in tqdm(enumerate(dataloader)),:
-            import ipdb; ipdb.set_trace()
+        print('training on epoch {}'.format(epoch))
+        for i, sample in enumerate(dataloader):
+            print('on batch {}'.format(i))
             frames = sample['frames']
             encoding = sample['hierarchy_encoding']
             if USECUDA:
-                frames = frames.cuda()
-                encoding = encoding.cuda()
-
+                frames = frames.type(torch.FloatTensor).to('cuda:0')
+                encoding = encoding.type(torch.FloatTensor).to('cuda:0')
+                net = net.to('cuda:0')
+            optimizer.zero_grad()
             pred_encoding = net(frames)
             loss = criterion(pred_encoding, encoding)
             loss.backward()
@@ -108,5 +111,5 @@ if __name__=='__main__':
     train_dataloader = data.DataLoader(DF, batch_size=8, num_workers=1)
                             
     # model instatntiation and training
-    model = C3D(input_shape=(3, 10, 20 , 20), embedding_dim=40) # TODO: replace these
+    model = C3D(input_shape=(3, 10, 20 , 20), embedding_dim=3) # TODO: replace these
     pretrain(model, train_dataloader, num_epochs=10)
