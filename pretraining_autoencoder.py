@@ -11,10 +11,14 @@ import pickle
 
 from torch.utils import data
 import torch.optim as optim
+from torchvision import transforms
 
 from src.tree_encoder import *
 from data.EK_dataloader import EK_Dataset, EK_Dataset_pretrain
 from data.gt_hierarchy import *
+from data.transforms import *
+
+
 # dataloaders
 
 DEBUG = True
@@ -29,9 +33,9 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=5, model_saveloc='mod
     # TODO iterate through the dataset, 10 epochs
     for epoch in range(num_epochs):
         for i, sample in enumerate(dataloader):
+            import ipdb; ipdb.set_trace()
             frames = sample['frames']
             encoding = sample['hierarchy_encoding']
-            import ipdb; ipdb.set_trace()
 
             pred_encoding = net(frames)
             loss = criterion(pred_encoding, encoding)
@@ -83,10 +87,16 @@ if __name__=='__main__':
     knowns = split['training_known']
     unknowns = split['training_unknown']
     # instantiating the dataloader
-    DF = EK_Dataset_pretrain(knowns, unknowns,
-            train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
-    train_dataloader = data.DataLoader(DF, batch_size=1) #num_workers=1)
+    composed_trans = transforms.Compose([Rescale((20,20)),
+                                        Transpose(),
+                                        TimeNormalize(10),
+                                        ToTensor()])
 
+    DF = EK_Dataset_pretrain(knowns, unknowns,
+            train_object_csvpath, train_action_csvpath, 
+            class_key_csvpath, image_data_folder, transform=composed_trans) 
+    train_dataloader = data.DataLoader(DF, batch_size=8, num_workers=1)
+                            
     # model instatntiation and training
-    model = C3D(input_shape=(3, 20 , 20, 10), embedding_dim=40) # TODO: replace these
+    model = C3D(input_shape=(3, 10, 20 , 20), embedding_dim=40) # TODO: replace these
     pretrain(model, train_dataloader, num_epochs=10)

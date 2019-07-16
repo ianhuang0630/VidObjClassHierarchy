@@ -21,7 +21,6 @@ class C3D(nn.Module):
 
     def __init__(self, input_shape, embedding_dim=40):
         super(C3D, self).__init__()
-        import ipdb; ipdb.set_trace()
         self.dropout = nn.Dropout(p=0.5)
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax()
