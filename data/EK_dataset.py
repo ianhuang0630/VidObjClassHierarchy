@@ -275,7 +275,7 @@ class DatasetFactory(object):
             frames_and_classes = []
             frame_index = 0
             for index, row  in sorted_video.iterrows():
-                if row['frame'] not in frame_to_bounding_boxes:
+                if str(participant_id)+'/'+str(video_id)+'/'+str(row['frame']) not in frame_to_bounding_boxes:
                     frame_to_bounding_boxes[str(participant_id)+'/'+str(video_id)+'/'+str(row['frame'])] = \
                             [{'noun_class':row['noun_class'], 
                                 'bbox':row['bounding_boxes']}]
