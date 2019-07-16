@@ -367,7 +367,7 @@ if __name__=='__main__':
 
     DF_pretrain = EK_Dataset_pretrain(knowns, unknowns,
             train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
-    import ipdb; ipdb.set_trace()
-    print(DF_pretrain[376+7])
+    for i in range(8):
+        print(DF_pretrain[112+i])
 
 
