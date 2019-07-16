@@ -50,13 +50,16 @@ class EK_Dataset_pretrain(Dataset):
         assert 'unknown_frame2bbox' in self.dataset \
                 and 'known_frame2bbox' in self.dataset, 'frame2bbox conversion not found'
         self.training_data = self.dataset['known_pretrain']
+        buffer_ = []
         for idx, sample in enumerate(self.training_data):
-            if not filter_function(sample):
-                self.training_data.pop(idx)
+            if filter_function(sample):
+                buffer_.append(sample)
+        self.training_data = buffer_
+        del buffer_
         self.f2bbox = self.dataset['known_frame2bbox']
 
     def __len__(self):
-        return len(self.pretrain_knowns)
+        return len(self.training_data)
 
     def __getitem__(self, idx):
         sample_dict = self.training_data[idx]
@@ -75,7 +78,7 @@ class EK_Dataset_pretrain(Dataset):
                 bboxes = self.f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
             except KeyError:
                 a += 30
-                # print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
+                print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
                 continue # this would ignore all the cases where the bounding box doesn't exist
             image = cv2.imread(image_path)
             valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
@@ -149,9 +152,12 @@ class EK_Dataset(Dataset):
             self.f2bbox[frame] = for_this_frame
 
         self.training_data = self.training_knowns + self.training_unknowns
+        buffer_ = []
         for idx, sample in enumerate(self.training_data):
-            if not filter_function(sample):
-                self.training_data.pop(idx)
+            if filter_function(sample):
+                buffer_.append(sample)
+        self.training_data = buffer_
+        del buffer_
         random.shuffle(self.training_data)
 
         # prepare tree

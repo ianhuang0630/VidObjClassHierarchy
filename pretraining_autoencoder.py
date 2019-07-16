@@ -85,8 +85,8 @@ if __name__=='__main__':
     # instantiating the dataloader
     DF = EK_Dataset_pretrain(knowns, unknowns,
             train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
-    train_dataloader = data.DataLoader(DF, batch_size=8, num_workers=8)
+    train_dataloader = data.DataLoader(DF, batch_size=1) #num_workers=1)
 
     # model instatntiation and training
     model = C3D(input_shape=(3, 20 , 20, 10), embedding_dim=40) # TODO: replace these
-    pretrain(model, dataloader, num_epochs=10)
+    pretrain(model, train_dataloader, num_epochs=10)
