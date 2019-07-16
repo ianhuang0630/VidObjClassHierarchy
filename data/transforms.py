@@ -2,6 +2,9 @@
 Implementations of different preprocessing transforms given to the dataloader
 """
 from torchvision import transforms
+import torch
+import cv2
+import numpy as np
 
 class Transpose(object):
 	def __init__(self):
@@ -47,7 +50,9 @@ class TimeNormalize(object):
 		# assuming tha tth frames are of shape
 		# 11 1080 1920 3
 		new_d = d.copy()
-		new_d['frames']= new_d['frames'][np.round(np.linspace(0,len(new_d['frames'])-1, num=self.num_frames)), :, :, :]
+        frames = new_d['frames'].transpose([1, 0, 2, 3])
+		new_d['frames']= frames[np.round(np.linspace(0,len(frames)-1, num=self.num_frames)).astype(np.int), :, :, :]
+        new_d['frames'] = new_d['frames'].transpose([1, 0, 2, 3])
 		return new_d
 
 class ToTensor(object):
