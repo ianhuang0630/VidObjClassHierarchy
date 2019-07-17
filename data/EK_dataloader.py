@@ -11,6 +11,7 @@ import cv2
 import os
 import ast
 import pickle
+from torch.utils import data
 
 try:
     from gt_hierarchy import *
@@ -203,7 +204,7 @@ class EK_Dataset_pretrain(Dataset):
         self.training_data = buffer_
         del buffer_
         self.f2bbox = self.dataset['known_frame2bbox']
-
+        self.skip_interval=10
     def __len__(self):
         return len(self.training_data)
 
@@ -229,19 +230,19 @@ class EK_Dataset_pretrain(Dataset):
             image = cv2.imread(image_path)
             valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
             if len(valid_candidates)==0 or valid_candidates[0] == '[]':
-                a+=30
+                a+=30 *self.skip_interval
                 continue
             else:
                 this_bbox = np.array(ast.literal_eval(valid_candidates[0]['bbox']))
                 # crop gt_bbox
                 if len(this_bbox) == 0: 
-                    a += 30
+                    a += 30 *self.skip_interval
                     continue
                 y, x, yd, xd = this_bbox[0]
                 image_black = np.zeros_like(image)
                 image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
                 frames.append(image_black)
-            a += 30
+            a += 30 *self.skip_interval
         frames = np.stack(frames, axis=3) # T x W x H x C # TODO: reshape needed?
         # get position in the tree
         encoding = get_tree_position(self.noun_dict[sample_dict['noun_class']], self.knowns)
@@ -396,10 +397,10 @@ if __name__=='__main__':
         split = pickle.load(f)
     knowns = split['training_known']
     unknowns = split['training_unknown']
-
+    
     DF_pretrain = EK_Dataset_pretrain(knowns, unknowns,
             train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
-    for i in range(8):
+    for i in range(4):
+        import ipdb; ipdb.set_trace()
         print(DF_pretrain[112+i])
-
-
+    
