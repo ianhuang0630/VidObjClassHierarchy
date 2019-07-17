@@ -24,8 +24,9 @@ from tqdm import tqdm
 
 DEBUG = True
 USECUDA = True 
+MODE = 'pairwise'
 
-def pretrain(net, dataloader, num_epochs=10, save_interval=1,
+def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1,
         model_saveloc='models/pretraining_pairwise'):
     if not os.path.exists(model_saveloc):
         os.makedirs(model_saveloc)
@@ -113,6 +114,9 @@ if __name__=='__main__':
     assert os.path.exists(class_key_csvpath), "{} does not exist".format(class_key_csvpath)
     image_data_folder = os.path.join(visual_images_folderpath, 'train')
 
+    image_normalized_dimensions = (150, 200)
+    time_normalized_dimension = 16
+
     # splitting known and unknown data
     if DEBUG:
         if not os.path.exists('current_split.pkl'):
@@ -130,16 +134,34 @@ if __name__=='__main__':
     knowns = split['training_known']
     unknowns = split['training_unknown']
     # instantiating the dataloader
-    composed_trans = transforms.Compose([Rescale((20,20)),
+    composed_trans_indiv = transforms.Compose([Rescale(image_normalized_dimensions),
                                         Transpose(),
-                                        TimeNormalize(10),
+                                        TimeNormalize(time_normalized_dimension),
                                         ToTensor()])
+    composed_trans_pair = transforms.Compose([ToTensor()])
 
-    DF = EK_Dataset_pretrain(knowns, unknowns,
-            train_object_csvpath, train_action_csvpath, 
-            class_key_csvpath, image_data_folder, transform=composed_trans) 
-    train_dataloader = data.DataLoader(DF, batch_size=4, num_workers=0)
-                            
-    # model instatntiation and training
-    model = C3D(input_shape=(3, 10, 20 , 20), embedding_dim=3) # TODO: replace these
-    pretrain(model, train_dataloader, num_epochs=10)
+    if MODE == 'individual':
+        DF = EK_Dataset_pretrain(knowns, unknowns,
+                train_object_csvpath, train_action_csvpath, 
+                class_key_csvpath, image_data_folder, transform=composed_trans_indiv) 
+        train_dataloader = data.DataLoader(DF, batch_size=4, num_workers=0)
+                                
+        # model instatntiation and training
+        model = C3D(input_shape=(3, time_normalized_dimension, mage_normalized_dimensions[0] , image_normalized_dimensions[1]), 
+                    embedding_dim=3) # TODO: replace these
+        pretrain(model, train_dataloader, num_epochs=10)
+
+    elif MODE == 'pairwise':
+        DF = EK_Dataset_pretrain_pairwise(knowns, unknowns,
+                train_object_csvpath, train_action_csvpath, 
+                class_key_csvpath, image_data_folder, 
+                individual_transform=composed_trans_indiv, 
+                pairwise_transform = composed_trans_pair
+                ) 
+        train_dataloader = data.DataLoader(DF, batch_size=4, num_workers=0)
+
+        model = C3D(input_shape=(3, time_normalized_dimension, mage_normalized_dimensions[0] , image_normalized_dimensions[1]), 
+                    embedding_dim=12) # TODO: replace these
+        pretrain_pairwise(model, train_dataloader, num_epochs=10)
+    else:
+        raise ValueError('invalid mode')

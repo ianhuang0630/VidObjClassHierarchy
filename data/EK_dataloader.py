@@ -71,14 +71,16 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             image_data_folder,
             num_samples=10000,
             filter_function = default_filter_function,
-            transform=None):
+            individual_transform=None,
+            pairwise_transform=None):
         # purpose of the dataset object: either for pretraining or for training/testing
         super(EK_Dataset_pretrain, self).__init__()
         self.image_data_folder = image_data_folder
         self.knowns = knowns
         self.unknowns = unknowns
-        self.transform = transform
-        self.num_samples = num_smaples
+        self.individual_transform = individual_transform
+        self.pairwise_transform = pairwise_transform
+        self.num_samples = num_samples
         self.class_key_df = pd.read_csv(class_key_path)
         # TODO: using the key, convert strings into unkowns
         self.class_key_dict = dict(zip(self.class_key_df.class_key, self.class_key_df.noun_id))
@@ -155,7 +157,8 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             d = {'frames': frames,
                  'noun_label': self.noun_dict[sample_dict['noun_class']],
                  'hierarchy_encoding': encoding}
-
+            if self.individual_transform is not None:
+                d = self.individual_transform(d)
             indiv_output_d.append(d)
         # get distance bretween the two noun classes
         pairwise_tree_dist = get_tree_distance(indiv_output_d[0]['noun_label'],
@@ -166,9 +169,10 @@ class EK_Dataset_pretrain_pairwise(Dataset):
                     'noun_label_a': indiv_output_d[0]['noun_label'],
                     'noun_label_b': indiv_output_d[1]['noun_label'],
                     'dist': pairwise_tree_dist}
-        if self.transform is not None:
-            return self.transform(output)
 
+        if self.pairwise_transform is not None:
+            output = self.pairwise_transform(output)
+            
         return output
 
 class EK_Dataset_pretrain(Dataset):
