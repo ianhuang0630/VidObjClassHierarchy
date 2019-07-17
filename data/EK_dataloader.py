@@ -222,10 +222,9 @@ class EK_Dataset_pretrain(Dataset):
         a = start_frame
         frames = []
 
-        if ((end_frame-start_frame)/30)/self.processed_frame_number > 20:
-            import ipdb; ipdb.set_trace()
+        if ((end_frame-start_frame)/30)/self.processed_frame_number > 5:
             # setting the skip_interval accordingly
-            skip_interval = np.floor((end_frame-start_frame/30)/self.processed_frame_number)
+            skip_interval = np.floor(((end_frame-start_frame)/30)/self.processed_frame_number)
             skip_interval = int(skip_interval)
         else:
             skip_interval = 1
@@ -237,7 +236,7 @@ class EK_Dataset_pretrain(Dataset):
             try:
                 bboxes = self.f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
             except KeyError:
-                a += 30
+                a += 30 * skip_interval
                 print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
                 continue # this would ignore all the cases where the bounding box doesn't exist
             image = cv2.imread(image_path)
