@@ -25,7 +25,41 @@ from tqdm import tqdm
 DEBUG = True
 USECUDA = True 
 
-def pretrain(net, dataloader, num_epochs=10, save_interval=5, 
+def pretrain(net, dataloader, num_epochs=10, save_interval=1,
+        model_saveloc='models/pretraining_pairwise'):
+    if not os.path.exists(model_saveloc):
+        os.makedirs(model_saveloc)
+
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.SGD(net.parameters(), 0.01)
+
+    for epoch in range(num_epochs):
+        print('training on epoch {}'.format(epoch))
+        for i in sample in enumerate(dataloader):
+            frames_a = sample['frames_a']
+            frames_b = sample['frames_b']
+            tree_distance = sample['dist']
+
+            if USECUDA:
+                frames_a = frames_a.type(torch.FloatTensor).to('cuda:0')
+                frames_b = frames_b.type(torch.FloatTensor).to('cuda:0')
+                tree_distance = tree_distance.type(torch.FloatTensor).to('cuda:')
+                net = net.to('cuda:0')
+
+            optimizer.zero_grad()
+            encoding_a = net(frames_a)
+            encoding_b = net(frames_b)
+            loss = criterion(torch.norm(encoding_a - encoding_b), tree_distance)
+            loss.backward()
+            optimizer.step()
+        if epoch % save_interval == 0:
+            print('current loss: {}'.format(str(loss)))
+
+            torch.save(net, os.path.join(model_saveloc,
+                'net_epoch{}.pth'.format(epoch)))
+    return net
+
+def pretrain(net, dataloader, num_epochs=10, save_interval=1, 
         model_saveloc='models/pretraining_single'):
     if not os.path.exists(model_saveloc):
         os.makedirs(model_saveloc)
@@ -33,10 +67,6 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=5,
     criterion = nn.MSELoss() 
     # optimizer
     optimizer = torch.optim.SGD(net.parameters(), 0.01)
-
-    # TODO moving types onto GPU
-    if USECUDA:
-        net = net.cuda()
         
     # TODO iterate through the dataset, 10 epochs
     for epoch in range(num_epochs):
