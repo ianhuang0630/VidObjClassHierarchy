@@ -177,6 +177,7 @@ class EK_Dataset_pretrain(Dataset):
             action_data_path,
             class_key_path,
             image_data_folder,
+            processed_frame_number = 20,
             filter_function = default_filter_function,
             transform=None):
         # purpose of the dataset object: either for pretraining or for training/testing
@@ -205,7 +206,9 @@ class EK_Dataset_pretrain(Dataset):
         del buffer_
         self.f2bbox = self.dataset['known_frame2bbox']
 
-        self.skip_interval=10 # TODO make this smarter
+        # used to handle cases when the clip is espeically long
+        self.processed_frame_number = processed_frame_number
+
     def __len__(self):
         return len(self.training_data)
 
@@ -218,6 +221,15 @@ class EK_Dataset_pretrain(Dataset):
 
         a = start_frame
         frames = []
+
+        if ((end_frame-start_frame)/30)/self.processed_frame_number > 20:
+            import ipdb; ipdb.set_trace()
+            # setting the skip_interval accordingly
+            skip_interval = np.floor((end_frame-start_frame/30)/self.processed_frame_number)
+            skip_interval = int(skip_interval)
+        else:
+            skip_interval = 1
+
         while a < end_frame:
             # loading this frame
             file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(a))[-10:]+'.jpg'
@@ -231,19 +243,19 @@ class EK_Dataset_pretrain(Dataset):
             image = cv2.imread(image_path)
             valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
             if len(valid_candidates)==0 or valid_candidates[0] == '[]':
-                a+=30 *self.skip_interval
+                a+=30 * skip_interval
                 continue
             else:
                 this_bbox = np.array(ast.literal_eval(valid_candidates[0]['bbox']))
                 # crop gt_bbox
                 if len(this_bbox) == 0: 
-                    a += 30 *self.skip_interval
+                    a += 30 * skip_interval
                     continue
                 y, x, yd, xd = this_bbox[0]
                 image_black = np.zeros_like(image)
                 image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
                 frames.append(image_black)
-            a += 30 *self.skip_interval
+            a += 30 * skip_interval
         frames = np.stack(frames, axis=3) # T x W x H x C # TODO: reshape needed?
         # get position in the tree
         encoding = get_tree_position(self.noun_dict[sample_dict['noun_class']], self.knowns)
