@@ -31,36 +31,36 @@ def default_filter_function(d):
     # filters out the ones where there are too few frames present
     return (d['end_frame'] - d['start_frame'])/30 > 10
 
-# def blackout_crop(start_Frame, end_frame, participant_id, video_id, f2bbox):
-#     # caching into a massive pickle file
-#     while a < end_frame:
-#                 # loading this frame
-#                 file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(a))[-10:]+'.jpg'
-#                 image_path = os.path.join(self.image_data_folder, file_path)
-#                 try:
-#                     bboxes = self.f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
-#                 except KeyError:
-#                     a += 30
-#                     print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
-#                     continue # this would ignore all the cases where the bounding box doesn't exist
-#                 image = cv2.imread(image_path)
-#                 valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
-#                 if len(valid_candidates)==0 or valid_candidates[0] == '[]':
-#                     a+=30
-#                     continue
-#                 else:
-#                     this_bbox = np.array(ast.literal_eval(valid_candidates[0]['bbox']))
-#                     # crop gt_bbox
-#                     if len(this_bbox) == 0:
-#                         a += 30
-#                         continue
-#                     y, x, yd, xd = this_bbox[0]
-#                     image_black = np.zeros_like(image)
-#                     image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
-#                     frames.append(image_black)
-#                 a += 30
-#         frames = np.stack(frames, axis=3) # T x W x H x C # TODO: reshape needed?
-#     return frames
+def blackout_crop(start_Frame, end_frame, participant_id, video_id, f2bbox):
+    # caching into a massive pickle file
+    while a < end_frame:
+                # loading this frame
+                file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(a))[-10:]+'.jpg'
+                image_path = os.path.join(self.image_data_folder, file_path)
+                try:
+                    bboxes = self.f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
+                except KeyError:
+                    a += 30
+                    print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
+                    continue # this would ignore all the cases where the bounding box doesn't exist
+                image = cv2.imread(image_path)
+                valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
+                if len(valid_candidates)==0 or valid_candidates[0] == '[]':
+                    a+=30
+                    continue
+                else:
+                    this_bbox = np.array(ast.literal_eval(valid_candidates[0]['bbox']))
+                    # crop gt_bbox
+                    if len(this_bbox) == 0:
+                        a += 30
+                        continue
+                    y, x, yd, xd = this_bbox[0]
+                    image_black = np.zeros_like(image)
+                    image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
+                    frames.append(image_black)
+                a += 30
+        frames = np.stack(frames, axis=3) # T x W x H x C # TODO: reshape needed?
+    return frames
 
 
 class EK_Dataset_pretrain_pairwise(Dataset):
@@ -204,7 +204,8 @@ class EK_Dataset_pretrain(Dataset):
         self.training_data = buffer_
         del buffer_
         self.f2bbox = self.dataset['known_frame2bbox']
-        self.skip_interval=10
+
+        self.skip_interval=10 # TODO make this smarter
     def __len__(self):
         return len(self.training_data)
 
