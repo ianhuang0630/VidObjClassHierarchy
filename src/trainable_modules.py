@@ -125,7 +125,6 @@ class BaselineVanillaModel(nn.Module):
         reformatted = feat_fc_out.t().view(-1, 1, feat_fc_out.shape[1], feat_fc_out.shape[0])
         feat_conv_out = self.feature_conv(reformatted)
         
-        import ipdb; ipdb.set_trace()
         # extracting image information
         image_conv_out = self.image_conv(image)
 
@@ -160,7 +159,7 @@ if __name__=='__main__':
         batches.append(image_resized)
     batches = np.array(batches).transpose([0, 4, 1, 2, 3])
     x = {'precomputed_features': torch.Tensor(feats), 'image': torch.Tensor(batches)}
-    import ipdb; ipdb.set_trace()
+    
     BVM = BaselineVanillaModel(x['precomputed_features'].shape[0], x['image'].shape, )
     output = BVM(x)
     print(output)
