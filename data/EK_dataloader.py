@@ -31,35 +31,84 @@ def default_filter_function(d):
     # filters out the ones where there are too few frames present
     return (d['end_frame'] - d['start_frame'])/30 > 10
 
-def blackout_crop(start_Frame, end_frame, participant_id, video_id, f2bbox):
-    # caching into a massive pickle file
-    while a < end_frame:
-        # loading this frame
-        file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(a))[-10:]+'.jpg'
-        image_path = os.path.join(self.image_data_folder, file_path)
-        try:
-            bboxes = self.f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
-        except KeyError:
-            a += 30
-            print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
-            continue # this would ignore all the cases where the bounding box doesn't exist
-        image = cv2.imread(image_path)
-        valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
-        if len(valid_candidates)==0 or valid_candidates[0] == '[]':
-            a+=30
-            continue
+def create_config_file(threshold, processed_frame_number, cache_dir='dataloader_cache/blackout_crop'):
+    # TODO import things: threshold, 
+    config = {'threshold': threshold, 'processed_frame_number': processed_frame_number}
+    with open (os.path.join(cache_dir, 'config.json'), 'w') as f:
+        json.dump(config, f)
+
+def blackout_crop_wrapper(sample_dict, processed_frame_number, f2bbox, threshold=2, 
+                            cache_dir='dataloader_cache/blackout_crop'):
+    
+    if os.path.exists(os.path.join(cache_dir, 'config.json')):
+        with open (os.path.join(cache_dir, 'config.json'), 'r') as f:
+            prev_config = json.load(f)
+        overwrite = not (prev_config == {'threshold': threshold, 'processed_frame_number': processed_frame_number})
+    else:
+        overwrite = True
+
+    return blackout_crop(sample_dict, processed_frame_number, f2bbox, threshold=threshold, 
+                    cache_dir=cache_dir, overwrite=overwite)
+
+def blackout_crop(sample_dict, processed_frame_number, f2bbox, threshold=2, 
+                cache_dir='dataloader_cache/backout_crop/', overwrite=False):
+
+    video_id = sample_dict['video_id']
+    participant_id = sample_dict['participant_id']
+    start_frame = sample_dict['start_frame']
+    end_frame = sample_dict['end_frame']
+
+    # TODO: checking cache and config files
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir, exist_ok=True)
+
+    cache_filename = 'v#{}p#{}s#{}e#{}.npy'.format(video_id, participant_id, start_frame, end_frame)
+
+    if os.path.exists(os.path.join(cache_dir, cache_filename)) and not overwrite:
+        frames = np.load(os.path.exists(os.path.join(cache_dir, cache_filename)))
+
+    else: 
+
+        a = start_frame
+        frames = []
+        if ((end_frame-start_frame)/30)/processed_frame_number > threshold:
+            skip_interval = np.floor(((end_frame-start_frame)/30)/processed_frame_number)
+            skip_interval = int(skip_interval)
         else:
-            this_bbox = np.array(ast.literal_eval(valid_candidates[0]['bbox']))
-            # crop gt_bbox
-            if len(this_bbox) == 0:
-                a += 30
+            skip_interval = 1
+
+        while a < end_frame:
+            # loading this frame
+            file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(a))[-10:]+'.jpg'
+            image_path = os.path.join(self.image_data_folder, file_path)
+            try:
+                bboxes = self.f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
+            except KeyError:
+                a += 30 * skip_interval
+                print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
+                continue # this would ignore all the cases where the bounding box doesn't exist
+            image = cv2.imread(image_path)
+            valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
+            if len(valid_candidates)==0 or valid_candidates[0] == '[]':
+                a+=30 * skip_interval
                 continue
-            y, x, yd, xd = this_bbox[0]
-            image_black = np.zeros_like(image)
-            image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
-            frames.append(image_black)
-        a += 30
-    frames = np.stack(frames, axis=3) # T x W x H x C # TODO: reshape needed?
+            else:
+                this_bbox = np.array(ast.literal_eval(valid_candidates[0]['bbox']))
+                # crop gt_bbox
+                if len(this_bbox) == 0:
+                    a += 30 * skip_interval
+                    continue
+                y, x, yd, xd = this_bbox[0]
+                image_black = np.zeros_like(image)
+                image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
+                frames.append(image_black)
+            a += 30 * skip_interval
+        frames = np.stack(frames, axis=3) # T x W x H x C # TODO: reshape needed?
+
+        # TODO: save cache
+        np.save(frames, os.path.join(cache_dir, cache_filename))
+        create_config_file(threshold, processed_frame_number, cache_dir='cache_Dir')
+
     return frames
 
 
@@ -125,41 +174,9 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             start_frame = sample_dict['start_frame']
             end_frame = sample_dict['end_frame']
 
-            a = start_frame
-            frames = []
-            if ((end_frame-start_frame)/30)/self.processed_frame_number > 2:
-                skip_interval = np.floor(((end_frame-start_frame)/30)/self.processed_frame_number)
-                skip_interval = int(skip_interval)
-            else:
-                skip_interval = 1
+            frames = blackout_crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, threshold=2, 
+                                cache_dir='dataloader_cache/blackout_crop')
 
-            while a < end_frame:
-                # loading this frame
-                file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(a))[-10:]+'.jpg'
-                image_path = os.path.join(self.image_data_folder, file_path)
-                try:
-                    bboxes = self.f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
-                except KeyError:
-                    a += 30 * skip_interval
-                    print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
-                    continue # this would ignore all the cases where the bounding box doesn't exist
-                image = cv2.imread(image_path)
-                valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
-                if len(valid_candidates)==0 or valid_candidates[0] == '[]':
-                    a+=30 * skip_interval
-                    continue
-                else:
-                    this_bbox = np.array(ast.literal_eval(valid_candidates[0]['bbox']))
-                    # crop gt_bbox
-                    if len(this_bbox) == 0:
-                        a += 30 * skip_interval
-                        continue
-                    y, x, yd, xd = this_bbox[0]
-                    image_black = np.zeros_like(image)
-                    image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
-                    frames.append(image_black)
-                a += 30 * skip_interval
-            frames = np.stack(frames, axis=3) # T x W x H x C # TODO: reshape needed?
             # get position in the tree
             encoding = get_tree_position(self.noun_dict[sample_dict['noun_class']], self.knowns)
             if encoding is None:
@@ -235,44 +252,10 @@ class EK_Dataset_pretrain(Dataset):
         participant_id = sample_dict['participant_id']
         start_frame = sample_dict['start_frame']
         end_frame = sample_dict['end_frame']
+        
+        frames = blackout_crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, threshold=2, 
+                                cache_dir='dataloader_cache/blackout_crop')
 
-        a = start_frame
-        frames = []
-
-        if ((end_frame-start_frame)/30)/self.processed_frame_number > 5:
-            # setting the skip_interval accordingly
-            skip_interval = np.floor(((end_frame-start_frame)/30)/self.processed_frame_number)
-            skip_interval = int(skip_interval)
-        else:
-            skip_interval = 1
-
-        while a < end_frame:
-            # loading this frame
-            file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(a))[-10:]+'.jpg'
-            image_path = os.path.join(self.image_data_folder, file_path)
-            try:
-                bboxes = self.f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
-            except KeyError:
-                a += 30 * skip_interval
-                print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
-                continue # this would ignore all the cases where the bounding box doesn't exist
-            image = cv2.imread(image_path)
-            valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
-            if len(valid_candidates)==0 or valid_candidates[0] == '[]':
-                a+=30 * skip_interval
-                continue
-            else:
-                this_bbox = np.array(ast.literal_eval(valid_candidates[0]['bbox']))
-                # crop gt_bbox
-                if len(this_bbox) == 0: 
-                    a += 30 * skip_interval
-                    continue
-                y, x, yd, xd = this_bbox[0]
-                image_black = np.zeros_like(image)
-                image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
-                frames.append(image_black)
-            a += 30 * skip_interval
-        frames = np.stack(frames, axis=3) # T x W x H x C # TODO: reshape needed?
         # get position in the tree
         encoding = get_tree_position(self.noun_dict[sample_dict['noun_class']], self.knowns)
         if encoding is None:
