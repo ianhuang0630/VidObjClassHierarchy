@@ -191,6 +191,7 @@ if __name__=='__main__':
         if not os.path.exists(model_saveloc):
             os.makedirs(model_saveloc, exist_ok=True)
 
+        save_training_config(os.path.join(model_saveloc, 'config.json'), args)
 
         DF = EK_Dataset_pretrain(knowns, unknowns,
                 train_object_csvpath, train_action_csvpath,
@@ -209,6 +210,7 @@ if __name__=='__main__':
         if not os.path.exists(model_saveloc):
             os.makedirs(model_saveloc, exist_ok=True)
 
+        save_training_config(os.path.join(model_saveloc, 'config.json'), args)
 
         DF = EK_Dataset_pretrain_pairwise(knowns, unknowns,
                 train_object_csvpath, train_action_csvpath, 
