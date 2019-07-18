@@ -18,6 +18,7 @@ from data.EK_dataloader import EK_Dataset, EK_Dataset_pretrain, EK_Dataset_pretr
 from data.gt_hierarchy import *
 from data.transforms import *
 
+import json
 from tqdm import tqdm
 
 # dataloaders
@@ -35,8 +36,8 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01
 
     for epoch in range(num_epochs):
         print('training on epoch {}'.format(epoch))
-        for i, sample in enumerate(dataloader):
-            print('on batch {}'.format(i))
+        for i, sample in enumerate(tqdm(dataloader)):
+            # print('on batch {}'.format(i))
             frames_a = sample['frames_a']
             frames_b = sample['frames_b']
             tree_distance = sample['dist']
@@ -75,8 +76,8 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=1, lr=0.01,
     # TODO iterate through the dataset, 10 epochs
     for epoch in range(num_epochs):
         print('training on epoch {}'.format(epoch))
-        for i, sample in enumerate(dataloader):
-            print('on batch {}'.format(i))
+        for i, sample in enumerate(tqdm(dataloader)):
+            # print('on batch {}'.format(i))
             frames = sample['frames']
             encoding = sample['hierarchy_encoding']
             if USECUDA:
@@ -112,7 +113,7 @@ def save_training_config(path, args):
                     'batch_size': args.batch_size,
                     'run_num': args.run_num,
                     'embedding_dimension': args.embedding_dim}
-    with open(path, 'wb') as f:
+    with open(path, 'w') as f:
         json.dump(config_dict, f)
     
 
@@ -198,7 +199,7 @@ if __name__=='__main__':
                 class_key_csvpath, image_data_folder, 
                 processed_frame_number=time_normalized_dimension,  
                 transform=composed_trans_indiv) 
-        train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=2)
+        train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
                                 
         # model instatntiation and training
         model = C3D(input_shape=(3, time_normalized_dimension, image_normalized_dimensions[0] , image_normalized_dimensions[1]), 
@@ -219,7 +220,7 @@ if __name__=='__main__':
                 individual_transform=composed_trans_indiv, 
                 pairwise_transform=composed_trans_pair
                 ) 
-        train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=2)
+        train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
 
         model = C3D(input_shape=(3, time_normalized_dimension, image_normalized_dimensions[0] , image_normalized_dimensions[1]), 
                     embedding_dim=args.embedding_dim) # TODO: replace these

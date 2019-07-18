@@ -37,7 +37,7 @@ def create_config_file(threshold, processed_frame_number, cache_dir='dataloader_
     with open (os.path.join(cache_dir, 'config.json'), 'w') as f:
         json.dump(config, f)
 
-def blackout_crop_wrapper(sample_dict, processed_frame_number, f2bbox, threshold=2, 
+def blackout_crop_wrapper(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2, 
                             cache_dir='dataloader_cache/blackout_crop'):
     
     if os.path.exists(os.path.join(cache_dir, 'config.json')):
@@ -47,10 +47,10 @@ def blackout_crop_wrapper(sample_dict, processed_frame_number, f2bbox, threshold
     else:
         overwrite = True
 
-    return blackout_crop(sample_dict, processed_frame_number, f2bbox, threshold=threshold, 
-                    cache_dir=cache_dir, overwrite=overwite)
+    return blackout_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=threshold, 
+                    cache_dir=cache_dir, overwrite=overwrite)
 
-def blackout_crop(sample_dict, processed_frame_number, f2bbox, threshold=2, 
+def blackout_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2, 
                 cache_dir='dataloader_cache/backout_crop/', overwrite=False):
 
     video_id = sample_dict['video_id']
@@ -65,7 +65,7 @@ def blackout_crop(sample_dict, processed_frame_number, f2bbox, threshold=2,
     cache_filename = 'v#{}p#{}s#{}e#{}.npy'.format(video_id, participant_id, start_frame, end_frame)
 
     if os.path.exists(os.path.join(cache_dir, cache_filename)) and not overwrite:
-        frames = np.load(os.path.exists(os.path.join(cache_dir, cache_filename)))
+        frames = np.load(os.path.join(cache_dir, cache_filename))
 
     else: 
 
@@ -80,9 +80,9 @@ def blackout_crop(sample_dict, processed_frame_number, f2bbox, threshold=2,
         while a < end_frame:
             # loading this frame
             file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(a))[-10:]+'.jpg'
-            image_path = os.path.join(self.image_data_folder, file_path)
+            image_path = os.path.join(image_data_folder, file_path)
             try:
-                bboxes = self.f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
+                bboxes = f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
             except KeyError:
                 a += 30 * skip_interval
                 print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
@@ -107,7 +107,7 @@ def blackout_crop(sample_dict, processed_frame_number, f2bbox, threshold=2,
 
         # TODO: save cache
         np.save(os.path.join(cache_dir, cache_filename), frames)
-        create_config_file(threshold, processed_frame_number, cache_dir='cache_Dir')
+        create_config_file(threshold, processed_frame_number, cache_dir=cache_dir)
 
     return frames
 
@@ -174,7 +174,7 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             start_frame = sample_dict['start_frame']
             end_frame = sample_dict['end_frame']
 
-            frames = blackout_crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, threshold=2, 
+            frames = blackout_crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
                                 cache_dir='dataloader_cache/blackout_crop')
 
             # get position in the tree
@@ -253,7 +253,7 @@ class EK_Dataset_pretrain(Dataset):
         start_frame = sample_dict['start_frame']
         end_frame = sample_dict['end_frame']
         
-        frames = blackout_crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, threshold=2, 
+        frames = blackout_crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
                                 cache_dir='dataloader_cache/blackout_crop')
 
         # get position in the tree
