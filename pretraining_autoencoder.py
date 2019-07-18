@@ -26,12 +26,12 @@ DEBUG = True
 USECUDA = True 
 MODE = 'pairwise'
 
-def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1,
-        model_saveloc='models/pretraining_pairwise'):
+def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01, 
+        model_saveloc='models/pretraining_tree/pairwise'):
     if not os.path.exists(model_saveloc):
-        os.makedirs(model_saveloc)
+        os.makedirs(model_saveloc, exist_ok=True)
     criterion = nn.MSELoss()
-    optimizer = torch.optim.SGD(net.parameters(), 0.01)
+    optimizer = torch.optim.SGD(net.parameters(), lr)
 
     for epoch in range(num_epochs):
         print('training on epoch {}'.format(epoch))
@@ -63,14 +63,14 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1,
                 'net_epoch{}.pth'.format(epoch)))
     return net
 
-def pretrain(net, dataloader, num_epochs=10, save_interval=1, 
-        model_saveloc='models/pretraining_single'):
+def pretrain(net, dataloader, num_epochs=10, save_interval=1, lr=0.01,
+        model_saveloc='models/pretraining_tree/single'):
     if not os.path.exists(model_saveloc):
-        os.makedirs(model_saveloc)
+        os.makedirs(model_saveloc, exist_ok=True)
     # define cost
     criterion = nn.MSELoss() 
     # optimizer
-    optimizer = torch.optim.SGD(net.parameters(), 0.01)
+    optimizer = torch.optim.SGD(net.parameters(), lr)
     loss_per_sample = []
     # TODO iterate through the dataset, 10 epochs
     for epoch in range(num_epochs):
@@ -88,20 +88,61 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=1,
             loss = criterion(pred_encoding, encoding)
             loss.backward()
             # saving loss
-            
+            loss_per_sample.append(list(loss.detach().cpu().numpy())[0])
             optimizer.step()
 
         if epoch % save_interval == 0:
             print('current loss: {}'.format(str(loss)))
+            # updating the loss file
+            with open(os.path.join(model_saveloc, 'netloss_epoch{}.pth'.format(epoch)), 
+                'wb') as f:
+                pickle.dump(loss_per_sample, f)
             # saving to the location
             torch.save(net, os.path.join(model_saveloc, 
                                         'net_epoch{}.pth'.format(epoch)))
 
     return net
 
+def save_training_config(path, args):
+    config_dict = {'num_epochs': args.epochs,
+                    'rescale_imwidth': args.rescale_imwidth,
+                    'rescale_imheight': args.rescale_imheight,
+                    'time_normalized_dimension': args.time_normalized_dimension,
+                    'lr': args.lr,
+                    'batch_size': args.batch_size,
+                    'run_num': args.run_num,
+                    'embedding_dimension': args.embedding_dim}
+    with open(path, 'wb') as f:
+        json.dump(config_dict, f)
+    
+
 if __name__=='__main__':
+
+    # argparse
+    parser = argparse.ArgumentParser(description='PyTorch hierarchy embedding pretraining')
+    parser.add_argument('--data', type=str, default='/vision/group/EPIC-KITCHENS',
+                        help='path to dataset directory')
+    parser.add_argument('--model_folder', type=str, default='models/pretraining_tree',
+                        help='path to dataset directory')
+    parser.add_argument('--epochs', type=int, default=30, help='number of epochs to train')
+    parser.add_argument('--rescale_imwidth', type=int, default = 200, 
+                        help='width of the image after rescaling')
+    parser.add_argument('--rescale_imheight', type=int, default = 150,
+                        help='height of the image after rescaling')
+    parser.add_argument('--time_normalized_dimension', type=int, default = 16,
+                        help='number of timesteps for which the normalization is done')
+    parser.add_argument('--lr', type=float, default=0.01, help='learning rate for the model')
+    parser.add_argument('--batch_size', type=int, default=4, help='training batch size')
+    parser.add_argument('--use-cuda', default=False, type=bool, metavar='C',
+                        help='use cuda')
+    parser.add_argument('--run_num', type=int, default=0, 
+                        help='the run number that will be included in all output files')
+    parser.add_argument('--embedding_dim', type=int, default=3,
+                        help='the dimensionality of the embedding, output from the tree encoder')
+    args = parser.parse_args()
+
     # Setting up the paths
-    dataset_path = '/vision/group/EPIC-KITCHENS/'
+    dataset_path = args.data
     annotations_foldername = 'annotations'
     annotations_folderpath = os.path.join(dataset_path, annotations_foldername)
     visual_dataset_path = os.path.join(dataset_path, 'EPIC_KITCHENS_2018.Bingbin')
@@ -119,8 +160,8 @@ if __name__=='__main__':
     assert os.path.exists(class_key_csvpath), "{} does not exist".format(class_key_csvpath)
     image_data_folder = os.path.join(visual_images_folderpath, 'train')
 
-    image_normalized_dimensions = (150, 200)
-    time_normalized_dimension = 16
+    image_normalized_dimensions = (args.rescale_imheight, args.rescale_imwidth)
+    time_normalized_dimension = args.time_normalized_dimension
 
     # splitting known and unknown data
     if DEBUG:
@@ -146,19 +187,29 @@ if __name__=='__main__':
     composed_trans_pair = transforms.Compose([ToTensor()])
 
     if MODE == 'individual':
+        model_saveloc = os.path.join(args.model_folder, 'individual_run{}'.format(args.run_num))
+        if not os.path.exists(model_saveloc):
+            os.makedirs(model_saveloc, exist_ok=True)
+
+
         DF = EK_Dataset_pretrain(knowns, unknowns,
                 train_object_csvpath, train_action_csvpath,
                 class_key_csvpath, image_data_folder, 
                 processed_frame_number=time_normalized_dimension,  
                 transform=composed_trans_indiv) 
-        train_dataloader = data.DataLoader(DF, batch_size=4, num_workers=0)
+        train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=2)
                                 
         # model instatntiation and training
         model = C3D(input_shape=(3, time_normalized_dimension, image_normalized_dimensions[0] , image_normalized_dimensions[1]), 
-                    embedding_dim=3) # TODO: replace these
-        pretrain(model, train_dataloader, num_epochs=30)
+                    embedding_dim=args.embedding_dim) # TODO: replace these
+        pretrain(model, train_dataloader, num_epochs=args.epochs, model_saveloc=model_saveloc)
 
     elif MODE == 'pairwise':
+        model_saveloc = os.path.join(args.model_folder, 'pairwise_run{}'.format(args.run_num))
+        if not os.path.exists(model_saveloc):
+            os.makedirs(model_saveloc, exist_ok=True)
+
+
         DF = EK_Dataset_pretrain_pairwise(knowns, unknowns,
                 train_object_csvpath, train_action_csvpath, 
                 class_key_csvpath, image_data_folder,
@@ -166,10 +217,10 @@ if __name__=='__main__':
                 individual_transform=composed_trans_indiv, 
                 pairwise_transform=composed_trans_pair
                 ) 
-        train_dataloader = data.DataLoader(DF, batch_size=4, num_workers=0)
+        train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=2)
 
         model = C3D(input_shape=(3, time_normalized_dimension, image_normalized_dimensions[0] , image_normalized_dimensions[1]), 
-                    embedding_dim=8) # TODO: replace these
-        pretrain_pairwise(model, train_dataloader, num_epochs=30)
+                    embedding_dim=args.embedding_dim) # TODO: replace these
+        pretrain_pairwise(model, train_dataloader, num_epochs=args.epochs, model_saveloc=model_saveloc)
     else:
         raise ValueError('invalid mode')
