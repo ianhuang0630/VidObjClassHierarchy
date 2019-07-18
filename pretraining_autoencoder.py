@@ -158,6 +158,8 @@ if __name__=='__main__':
                         help='the run number that will be included in all output files')
     parser.add_argument('--embedding_dim', type=int, default=3,
                         help='the dimensionality of the embedding, output from the tree encoder')
+    parser.add_argument('--num_samples', type=int, default=1000,
+                        help='The number of pairwise samples, applicable only if the mode is "pairwise"')
     args = parser.parse_args()
 
     # Setting up the paths
@@ -237,8 +239,8 @@ if __name__=='__main__':
                 processed_frame_number=time_normalized_dimension, 
                 individual_transform=composed_trans_indiv, 
                 pairwise_transform=composed_trans_pair,
-                num_samples=1000) 
-        train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0, )
+                num_samples=args.num_samples) 
+        train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
 
         model = C3D(input_shape=(3, time_normalized_dimension, image_normalized_dimensions[0] , image_normalized_dimensions[1]), 
                     embedding_dim=args.embedding_dim) # TODO: replace these
