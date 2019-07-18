@@ -106,7 +106,7 @@ def blackout_crop(sample_dict, processed_frame_number, f2bbox, threshold=2,
         frames = np.stack(frames, axis=3) # T x W x H x C # TODO: reshape needed?
 
         # TODO: save cache
-        np.save(frames, os.path.join(cache_dir, cache_filename))
+        np.save(os.path.join(cache_dir, cache_filename), frames)
         create_config_file(threshold, processed_frame_number, cache_dir='cache_Dir')
 
     return frames
