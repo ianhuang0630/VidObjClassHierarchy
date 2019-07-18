@@ -128,11 +128,9 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             a = start_frame
             frames = []
             if ((end_frame-start_frame)/30)/self.processed_frame_number > 2:
-                print('too long, adjusting skip_interval')
                 skip_interval = np.floor(((end_frame-start_frame)/30)/self.processed_frame_number)
                 skip_interval = int(skip_interval)
             else:
-                print('just right, keeping skip_interval')
                 skip_interval = 1
 
             while a < end_frame:

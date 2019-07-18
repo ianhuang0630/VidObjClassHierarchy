@@ -37,7 +37,6 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1,
         print('training on epoch {}'.format(epoch))
         for i, sample in enumerate(dataloader):
             print('on batch {}'.format(i))
-            print('loaded data')
             frames_a = sample['frames_a']
             frames_b = sample['frames_b']
             tree_distance = sample['dist']
@@ -57,7 +56,6 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1,
                             tree_distance)
             loss.backward()
             optimizer.step()
-            print('done with backprop')
         if epoch % save_interval == 0:
             print('current loss: {}'.format(str(loss)))
 
@@ -73,7 +71,7 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=1,
     criterion = nn.MSELoss() 
     # optimizer
     optimizer = torch.optim.SGD(net.parameters(), 0.01)
-        
+    loss_per_sample = []
     # TODO iterate through the dataset, 10 epochs
     for epoch in range(num_epochs):
         print('training on epoch {}'.format(epoch))
@@ -89,6 +87,8 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=1,
             pred_encoding = net(frames)
             loss = criterion(pred_encoding, encoding)
             loss.backward()
+            # saving loss
+            
             optimizer.step()
 
         if epoch % save_interval == 0:
