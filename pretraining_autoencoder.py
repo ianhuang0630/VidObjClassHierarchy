@@ -33,7 +33,8 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01
         os.makedirs(model_saveloc, exist_ok=True)
     criterion = nn.MSELoss()
     optimizer = torch.optim.SGD(net.parameters(), lr)
-
+    counter = 0
+    loss_per_sample = []
     for epoch in range(num_epochs):
         print('training on epoch {}'.format(epoch))
         for i, sample in enumerate(tqdm(dataloader)):
@@ -55,11 +56,21 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01
                                             encoding_a - encoding_b,
                                             (encoding_a - encoding_b).t()))),
                             tree_distance)
+            loss_per_sample.append(loss.detach().cpu().numpy())
             loss.backward()
             optimizer.step()
+
+            if counter % 10 == 0: 
+                with open(os.path.join(model_saveloc, 'netloss_epoch{}.pth'.format(epoch)), 
+                            'wb') as f:
+                    pickle.dump(loss_per_sample, f)
+            counter += 1
+
         if epoch % save_interval == 0:
             print('current loss: {}'.format(str(loss)))
-
+            with open(os.path.join(model_saveloc, 'netloss_epoch{}.pth'.format(epoch)), 
+                'wb') as f:
+                pickle.dump(loss_per_sample, f)
             torch.save(net, os.path.join(model_saveloc,
                 'net_epoch{}.pth'.format(epoch)))
     return net
@@ -73,6 +84,7 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=1, lr=0.01,
     # optimizer
     optimizer = torch.optim.SGD(net.parameters(), lr)
     loss_per_sample = []
+    counter = 0
     # TODO iterate through the dataset, 10 epochs
     for epoch in range(num_epochs):
         print('training on epoch {}'.format(epoch))
@@ -91,6 +103,12 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=1, lr=0.01,
             # saving loss
             loss_per_sample.append(list(loss.detach().cpu().numpy())[0])
             optimizer.step()
+            
+            if counter % 10 == 0: 
+                with open(os.path.join(model_saveloc, 'netloss_epoch{}.pth'.format(epoch)), 
+                            'wb') as f:
+                    pickle.dump(loss_per_sample, f)
+            counter += 1
 
         if epoch % save_interval == 0:
             print('current loss: {}'.format(str(loss)))
@@ -218,9 +236,9 @@ if __name__=='__main__':
                 class_key_csvpath, image_data_folder,
                 processed_frame_number=time_normalized_dimension, 
                 individual_transform=composed_trans_indiv, 
-                pairwise_transform=composed_trans_pair
-                ) 
-        train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0, num_samples=1000)
+                pairwise_transform=composed_trans_pair,
+                num_samples=1000) 
+        train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0, )
 
         model = C3D(input_shape=(3, time_normalized_dimension, image_normalized_dimensions[0] , image_normalized_dimensions[1]), 
                     embedding_dim=args.embedding_dim) # TODO: replace these

@@ -33,7 +33,7 @@ class Rescale(object):
         frames = frames.transpose([3,0,1,2])
         frames_resized = []
         for frame in frames:
-            frames_resized.append(cv2.resize(frame, self.output_size))
+            frames_resized.append(cv2.resize(frame, self.output_size[::-1]))
         frames_resized = np.stack(frames_resized, axis=3)
 
         # TODO
