@@ -86,8 +86,11 @@ def blackout_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder
             except KeyError:
                 a += 30 * skip_interval
                 print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
-                continue # this would ignore all the cases where the bounding box doesn't exist
+                continue # this would ignorein all the cases where the bounding box doesn't exist
             image = cv2.imread(image_path)
+            # resizing the image
+            image = cv2.resize(image, [int(dim/2) for dim in image.shape][:2])
+
             valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
             if len(valid_candidates)==0 or valid_candidates[0] == '[]':
                 a+=30 * skip_interval
