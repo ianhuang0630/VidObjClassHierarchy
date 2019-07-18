@@ -14,7 +14,7 @@ import torch.optim as optim
 from torchvision import transforms
 
 from src.tree_encoder import *
-from data.EK_dataloader import EK_Dataset, EK_Dataset_pretrain
+from data.EK_dataloader import EK_Dataset, EK_Dataset_pretrain, EK_Dataset_pretrain_pairwise 
 from data.gt_hierarchy import *
 from data.transforms import *
 
@@ -30,13 +30,14 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1,
         model_saveloc='models/pretraining_pairwise'):
     if not os.path.exists(model_saveloc):
         os.makedirs(model_saveloc)
-
     criterion = nn.MSELoss()
     optimizer = torch.optim.SGD(net.parameters(), 0.01)
 
     for epoch in range(num_epochs):
         print('training on epoch {}'.format(epoch))
-        for i in sample in enumerate(dataloader):
+        for i, sample in enumerate(dataloader):
+            print('on batch {}'.format(i))
+            print('loaded data')
             frames_a = sample['frames_a']
             frames_b = sample['frames_b']
             tree_distance = sample['dist']
@@ -44,15 +45,19 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1,
             if USECUDA:
                 frames_a = frames_a.type(torch.FloatTensor).to('cuda:0')
                 frames_b = frames_b.type(torch.FloatTensor).to('cuda:0')
-                tree_distance = tree_distance.type(torch.FloatTensor).to('cuda:')
+                tree_distance = tree_distance.type(torch.FloatTensor).to('cuda:0')
                 net = net.to('cuda:0')
 
             optimizer.zero_grad()
             encoding_a = net(frames_a)
             encoding_b = net(frames_b)
-            loss = criterion(torch.norm(encoding_a - encoding_b), tree_distance)
+            loss= criterion(torch.sqrt(torch.diag(torch.matmul(
+                                            encoding_a - encoding_b,
+                                            (encoding_a - encoding_b).t()))),
+                            tree_distance)
             loss.backward()
             optimizer.step()
+            print('done with backprop')
         if epoch % save_interval == 0:
             print('current loss: {}'.format(str(loss)))
 
@@ -142,26 +147,29 @@ if __name__=='__main__':
 
     if MODE == 'individual':
         DF = EK_Dataset_pretrain(knowns, unknowns,
-                train_object_csvpath, train_action_csvpath, 
-                class_key_csvpath, image_data_folder, transform=composed_trans_indiv) 
+                train_object_csvpath, train_action_csvpath,
+                class_key_csvpath, image_data_folder, 
+                processed_frame_number=time_normalized_dimension,  
+                transform=composed_trans_indiv) 
         train_dataloader = data.DataLoader(DF, batch_size=4, num_workers=0)
                                 
         # model instatntiation and training
-        model = C3D(input_shape=(3, time_normalized_dimension, mage_normalized_dimensions[0] , image_normalized_dimensions[1]), 
+        model = C3D(input_shape=(3, time_normalized_dimension, image_normalized_dimensions[0] , image_normalized_dimensions[1]), 
                     embedding_dim=3) # TODO: replace these
-        pretrain(model, train_dataloader, num_epochs=10)
+        pretrain(model, train_dataloader, num_epochs=30)
 
     elif MODE == 'pairwise':
         DF = EK_Dataset_pretrain_pairwise(knowns, unknowns,
                 train_object_csvpath, train_action_csvpath, 
-                class_key_csvpath, image_data_folder, 
+                class_key_csvpath, image_data_folder,
+                processed_frame_number=time_normalized_dimension, 
                 individual_transform=composed_trans_indiv, 
-                pairwise_transform = composed_trans_pair
+                pairwise_transform=composed_trans_pair
                 ) 
         train_dataloader = data.DataLoader(DF, batch_size=4, num_workers=0)
 
-        model = C3D(input_shape=(3, time_normalized_dimension, mage_normalized_dimensions[0] , image_normalized_dimensions[1]), 
-                    embedding_dim=12) # TODO: replace these
-        pretrain_pairwise(model, train_dataloader, num_epochs=10)
+        model = C3D(input_shape=(3, time_normalized_dimension, image_normalized_dimensions[0] , image_normalized_dimensions[1]), 
+                    embedding_dim=8) # TODO: replace these
+        pretrain_pairwise(model, train_dataloader, num_epochs=30)
     else:
         raise ValueError('invalid mode')

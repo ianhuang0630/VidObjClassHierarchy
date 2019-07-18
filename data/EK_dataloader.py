@@ -71,10 +71,11 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             image_data_folder,
             num_samples=10000,
             filter_function = default_filter_function,
+            processed_frame_number = 20, 
             individual_transform=None,
             pairwise_transform=None):
         # purpose of the dataset object: either for pretraining or for training/testing
-        super(EK_Dataset_pretrain, self).__init__()
+        super(EK_Dataset_pretrain_pairwise, self).__init__()
         self.image_data_folder = image_data_folder
         self.knowns = knowns
         self.unknowns = unknowns
@@ -100,12 +101,18 @@ class EK_Dataset_pretrain_pairwise(Dataset):
         self.training_data = buffer_
         del buffer_
         self.f2bbox = self.dataset['known_frame2bbox']
+        
+        # used to handle cases when the clip is especially long
+        self.processed_frame_number = processed_frame_number
 
         # naive sampling of pairwise
         self.rand_selection_indices = []
         for i in range(num_samples):
             selection_indices = list(np.random.choice(len(self.training_data), 2))
             self.rand_selection_indices.append(selection_indices)
+    
+    def __len__(self):
+        return len(self.rand_selection_indices)
 
     def __getitem__(self, idx):
         sample_a = self.training_data[self.rand_selection_indices[idx][0]]
@@ -120,6 +127,14 @@ class EK_Dataset_pretrain_pairwise(Dataset):
 
             a = start_frame
             frames = []
+            if ((end_frame-start_frame)/30)/self.processed_frame_number > 2:
+                print('too long, adjusting skip_interval')
+                skip_interval = np.floor(((end_frame-start_frame)/30)/self.processed_frame_number)
+                skip_interval = int(skip_interval)
+            else:
+                print('just right, keeping skip_interval')
+                skip_interval = 1
+
             while a < end_frame:
                 # loading this frame
                 file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(a))[-10:]+'.jpg'
@@ -127,25 +142,25 @@ class EK_Dataset_pretrain_pairwise(Dataset):
                 try:
                     bboxes = self.f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
                 except KeyError:
-                    a += 30
+                    a += 30 * skip_interval
                     print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
                     continue # this would ignore all the cases where the bounding box doesn't exist
                 image = cv2.imread(image_path)
                 valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
                 if len(valid_candidates)==0 or valid_candidates[0] == '[]':
-                    a+=30
+                    a+=30 * skip_interval
                     continue
                 else:
                     this_bbox = np.array(ast.literal_eval(valid_candidates[0]['bbox']))
                     # crop gt_bbox
                     if len(this_bbox) == 0:
-                        a += 30
+                        a += 30 * skip_interval
                         continue
                     y, x, yd, xd = this_bbox[0]
                     image_black = np.zeros_like(image)
                     image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
                     frames.append(image_black)
-                a += 30
+                a += 30 * skip_interval
             frames = np.stack(frames, axis=3) # T x W x H x C # TODO: reshape needed?
             # get position in the tree
             encoding = get_tree_position(self.noun_dict[sample_dict['noun_class']], self.knowns)
@@ -414,9 +429,12 @@ if __name__=='__main__':
     knowns = split['training_known']
     unknowns = split['training_unknown']
     
-    DF_pretrain = EK_Dataset_pretrain(knowns, unknowns,
+    DF_pretrain = EK_Dataset_pretrain_pairwise(knowns, unknowns,
             train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
-    for i in range(4):
-        import ipdb; ipdb.set_trace()
-        print(DF_pretrain[112+i])
+    import ipdb; ipdb.set_trace()
+    print(DF_pretrain[14])
+    # for i in range(4):
+    #     import ipdb; ipdb.set_trace()
+    #     print(DF_pretrain[112+i])
+    
     
