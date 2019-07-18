@@ -220,10 +220,10 @@ if __name__=='__main__':
                 individual_transform=composed_trans_indiv, 
                 pairwise_transform=composed_trans_pair
                 ) 
-        train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
+        train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0, num_samples=1000)
 
         model = C3D(input_shape=(3, time_normalized_dimension, image_normalized_dimensions[0] , image_normalized_dimensions[1]), 
-                    embedding_dim=args.embedding_dim, num_samples=1000) # TODO: replace these
+                    embedding_dim=args.embedding_dim) # TODO: replace these
         pretrain_pairwise(model, train_dataloader, num_epochs=args.epochs, model_saveloc=model_saveloc)
     else:
         raise ValueError('invalid mode')
