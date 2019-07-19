@@ -61,14 +61,14 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01
             optimizer.step()
 
             if counter % 10 == 0: 
-                with open(os.path.join(model_saveloc, 'netloss_epoch{}.pth'.format(epoch)), 
+                with open(os.path.join(model_saveloc, 'training_losses.pkl'.format(epoch)), 
                             'wb') as f:
                     pickle.dump(loss_per_sample, f)
             counter += 1
 
         if epoch % save_interval == 0:
             print('current loss: {}'.format(str(loss)))
-            with open(os.path.join(model_saveloc, 'netloss_epoch{}.pth'.format(epoch)), 
+            with open(os.path.join(model_saveloc, 'training_losses.pkl'.format(epoch)), 
                 'wb') as f:
                 pickle.dump(loss_per_sample, f)
             torch.save(net, os.path.join(model_saveloc,
@@ -105,7 +105,7 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=1, lr=0.01,
             optimizer.step()
             
             if counter % 10 == 0: 
-                with open(os.path.join(model_saveloc, 'netloss_epoch{}.pth'.format(epoch)), 
+                with open(os.path.join(model_saveloc, 'training_losses.pkl'),
                             'wb') as f:
                     pickle.dump(loss_per_sample, f)
             counter += 1
@@ -113,7 +113,7 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=1, lr=0.01,
         if epoch % save_interval == 0:
             print('current loss: {}'.format(str(loss)))
             # updating the loss file
-            with open(os.path.join(model_saveloc, 'netloss_epoch{}.pth'.format(epoch)), 
+            with open(os.path.join(model_saveloc, 'training_losses.pkl'.format(epoch)), 
                 'wb') as f:
                 pickle.dump(loss_per_sample, f)
             # saving to the location
@@ -224,7 +224,7 @@ if __name__=='__main__':
         # model instatntiation and training
         model = C3D(input_shape=(3, time_normalized_dimension, image_normalized_dimensions[0] , image_normalized_dimensions[1]), 
                     embedding_dim=args.embedding_dim) # TODO: replace these
-        pretrain(model, train_dataloader, num_epochs=args.epochs, model_saveloc=model_saveloc)
+        pretrain(model, train_dataloader, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
 
     elif MODE == 'pairwise':
         model_saveloc = os.path.join(args.model_folder, 'pairwise_run{}'.format(args.run_num))
@@ -244,6 +244,6 @@ if __name__=='__main__':
 
         model = C3D(input_shape=(3, time_normalized_dimension, image_normalized_dimensions[0] , image_normalized_dimensions[1]), 
                     embedding_dim=args.embedding_dim) # TODO: replace these
-        pretrain_pairwise(model, train_dataloader, num_epochs=args.epochs, model_saveloc=model_saveloc)
+        pretrain_pairwise(model, train_dataloader, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
     else:
         raise ValueError('invalid mode')
