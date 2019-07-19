@@ -51,7 +51,7 @@ def blackout_crop_wrapper(sample_dict, processed_frame_number, f2bbox, image_dat
                     cache_dir=cache_dir, overwrite=overwrite)
 
 def blackout_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2, 
-                cache_dir='dataloader_cache/backout_crop/', overwrite=False):
+                cache_dir='dataloader_cache/backout_crop/', overwrite=False, scale = 0.5):
 
     video_id = sample_dict['video_id']
     participant_id = sample_dict['participant_id']
@@ -89,7 +89,7 @@ def blackout_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder
                 continue # this would ignorein all the cases where the bounding box doesn't exist
             image = cv2.imread(image_path)
             # resizing the image
-            image = cv2.resize(image, tuple([int(dim/2) for dim in image.shape][:2][::-1]))
+            image = cv2.resize(image, tuple([int(dim*scale) for dim in image.shape][:2][::-1]))
 
             valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
             if len(valid_candidates)==0 or valid_candidates[0] == '[]':
@@ -102,6 +102,8 @@ def blackout_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder
                     a += 30 * skip_interval
                     continue
                 y, x, yd, xd = this_bbox[0]
+                y, x, yd, xd = int(y*scale), int(x*scale), int(yd*scale), int(xd*scale)
+                
                 image_black = np.zeros_like(image)
                 image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
                 frames.append(image_black)
