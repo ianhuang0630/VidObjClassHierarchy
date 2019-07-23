@@ -2,6 +2,7 @@
 Implementations of different preprocessing transforms given to the dataloader
 """
 from torchvision import transforms
+import torchvision.models as models
 import torch
 import cv2
 import numpy as np
@@ -64,6 +65,33 @@ class ToTensor(object):
             if type(new_d[key_]) is np.ndarray:
                 new_d[key_] = torch.from_numpy(new_d[key_])
         return new_d
+
+class BGR2RGB(object):
+    def __init__ (self):
+        pass
+
+    def __call__(self, d):
+        pass
+
+class GetResnet1024(object):
+    def __init__(self):
+        # instantiate network
+        self.model = models.resnet18(pretrained=True)
+        
+        # make relevant transforms
+        # 0) transpose
+        # 1) BGR2RGB
+        convertRGB = BGR2RGB()
+        # 2) resize (224, 224)
+        rescale = Rescale((224, 224))
+        # 3) normalize values 
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+        self.transforms = transforms.Compose(convertRGB,
+                                            rescale,)
+
+    def __call__(self, d):
+        pass
 
 if __name__=='__main__':
     # first rescale

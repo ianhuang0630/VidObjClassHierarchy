@@ -130,7 +130,8 @@ def save_training_config(path, args):
                     'lr': args.lr,
                     'batch_size': args.batch_size,
                     'run_num': args.run_num,
-                    'embedding_dimension': args.embedding_dim}
+                    'embedding_dimension': args.embedding_dim,
+                    'crop_mode': args.crop_mode}
     with open(path, 'w') as f:
         json.dump(config_dict, f)
     
@@ -160,6 +161,8 @@ if __name__=='__main__':
                         help='the dimensionality of the embedding, output from the tree encoder')
     parser.add_argument('--num_samples', type=int, default=1000,
                         help='The number of pairwise samples, applicable only if the mode is "pairwise"')
+    parser.add_argument('--crop_mode', type=str, default='backout',
+                        help='The mode for the crop done around the object of interest. Can either be blackout or rescale.')
     args = parser.parse_args()
 
     # Setting up the paths
@@ -218,7 +221,9 @@ if __name__=='__main__':
                 train_object_csvpath, train_action_csvpath,
                 class_key_csvpath, image_data_folder, 
                 processed_frame_number=time_normalized_dimension,  
-                transform=composed_trans_indiv) 
+                transform=composed_trans_indiv,
+                crop_type=args.crop_mode
+                ) 
         train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
                                 
         # model instatntiation and training
@@ -239,7 +244,9 @@ if __name__=='__main__':
                 processed_frame_number=time_normalized_dimension, 
                 individual_transform=composed_trans_indiv, 
                 pairwise_transform=composed_trans_pair,
-                num_samples=args.num_samples) 
+                num_samples=args.num_samples, 
+                crop_type=args.crop_mode
+                ) 
         train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
 
         model = C3D(input_shape=(3, time_normalized_dimension, image_normalized_dimensions[0] , image_normalized_dimensions[1]), 

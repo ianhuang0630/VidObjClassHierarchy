@@ -6,6 +6,7 @@ import random
 DEBUG = True
 if DEBUG:
     random.seed(7)
+    np.random.seed(7)
 
 def tree_dist(loc1, loc2):
     lock = False
@@ -110,37 +111,69 @@ def get_tree_position(class_, known_classes, tree_file='hierarchyV1.json'):
 
     return encoding
 
-def get_known_unknown_split(tree_file='hierarchyV1.json'):
-    """ gets the training/testing known/unknown splits
+# TODO: add required_training_knowns file, which contains the classes which 
+# must be in the training known section
+def get_known_unknown_split(tree_file='hierarchyV1.json', 
+                            required_training_knowns='EK_imagenet_intersection.txt',
+                            max_training_unknowns = 8):
+    """ gets the training/testing known/unknown split
     """
     # training knowns and unknowns
     # testing unknowns
-    assert os.path.exists(tree_file), '{} does not exist'.format(tree_file)
-    with open(tree_file, 'r') as f:
-        hierarchy = json.load(f)
-    assert type(hierarchy) == dict
     training_unknowns = []
     testing_unknowns = []
     training_knowns = []
 
+    if required_training_knowns is not None:
+        # loading the required training known classes
+        with open(required_training_knowns, 'r') as f:
+            lines = f.read()
+
+        required_training_knowns = [element for element in lines.split('\n') if len(element)>0]
+        if len(required_training_knowns) > max_training_unknowns:
+            # choose a subset of them
+            include_training_unknowns = list(np.random.choice(required_training_knowns, max_training_unknowns, replace=False)[0])
+            found = {element: False for element in include_training_unknowns}
+            training_unknowns.extend(include_training_unknowns)
+
+    assert os.path.exists(tree_file), '{} does not exist'.format(tree_file)
+    with open(tree_file, 'r') as f:
+        hierarchy = json.load(f)
+    assert type(hierarchy) == dict
+    
     for layer1_class in hierarchy:
         for layer2_subhierarchy in hierarchy[layer1_class]:
             layer2_class = list(layer2_subhierarchy.keys())[0]
             subsubhierarchy = layer2_subhierarchy[layer2_class]
             this_branch_candidates = []
+            num_required_training_unknowns = 0
             for layer3_class in subsubhierarchy:
-                this_branch_candidates.append(layer3_class)
+                # take out the ones that are reuqired training_unknowns
+                if layer3_class not in include_training_unknowns:
+                    this_branch_candidates.append(layer3_class)
+                else:
+                    num_required_training_unknowns += 1
+                    found[layer3_class] = True
+
             random.shuffle(this_branch_candidates)
             # splitting into three even groups, in the following pirority order:
             # training known, testing unknown, training unknown
 
-            a = int(np.ceil(len(this_branch_candidates)/3.0))
-            training_known = this_branch_candidates [:a]
-            training_knowns.extend(training_known)
-            testing_unknown = this_branch_candidates [a:2*a]
-            testing_unknowns.extend(testing_unknown)
+            a = int(np.ceil((len(this_branch_candidates) + num_required_training_unknowns)/3.0))
+            if num_required_training_unknowns > a:
+                b = num_required_training_unknowns
+            else:
+                b = a - num_required_training_unknowns
+
+            training_unknown = this_branch_candidates [:b]
+            training_unknowns.extend(training_unknown)
+            testing_known = this_branch_candidates [b:2*a]
+            testing_knowns.extend(testing_known)
             training_unknown = this_branch_candidates [2*a:]
             training_unknowns.extend(training_unknown)
+
+    assert all(list(found.values())), 
+        'Some of the required training unknowns were not found in the hierarchy. Check spelling in original file.'
 
     return {'training_unknown': training_unknowns,
             'training_known': training_knowns,

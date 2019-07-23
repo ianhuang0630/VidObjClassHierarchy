@@ -31,27 +31,98 @@ def default_filter_function(d):
     # filters out the ones where there are too few frames present
     return (d['end_frame'] - d['start_frame'])/30 > 10
 
-def create_config_file(threshold, processed_frame_number, cache_dir='dataloader_cache/blackout_crop'):
+def create_config_file(threshold, processed_frame_number, scaling=0.5, cache_dir='dataloader_cache/blackout_crop'):
     # TODO import things: threshold, 
-    config = {'threshold': threshold, 'processed_frame_number': processed_frame_number}
+    config = {'threshold': threshold, 'processed_frame_number': processed_frame_number, 
+            'scaling': scaling}
     with open (os.path.join(cache_dir, 'config.json'), 'w') as f:
         json.dump(config, f)
 
-def blackout_crop_wrapper(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2, 
-                            cache_dir='dataloader_cache/blackout_crop'):
+def crop_wrapper(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2, scaling=0.5,
+                            cache_dir='dataloader_cache/blackout_crop', mode='blackout'):
     
     if os.path.exists(os.path.join(cache_dir, 'config.json')):
         with open (os.path.join(cache_dir, 'config.json'), 'r') as f:
             prev_config = json.load(f)
-        overwrite = not (prev_config == {'threshold': threshold, 'processed_frame_number': processed_frame_number})
+        overwrite = not (prev_config == {'threshold': threshold, 'processed_frame_number': processed_frame_number,
+                                        'scaling': scaling})
     else:
         overwrite = True
+    if mode == 'blackout':
+        return blackout_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=threshold, 
+                    cache_dir=cache_dir, overwrite=overwrite, scale=scaling)
+    else:
+        return rescaling_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=threshold, 
+                    cache_dir=cache_dir, overwrite=overwrite, scale=scaling)
 
-    return blackout_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=threshold, 
-                    cache_dir=cache_dir, overwrite=overwrite)
+def rescaling_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2,
+            cache_dir='dataloader_cache/rescaling_crop', overwrite=False, scale=0.5):
+    video_id = sample_dict['video_id']
+    participant_id = sample_dict['participant_id']
+    start_frame = sample_dict['start_frame']
+    end_frame = sample_dict['end_frame']
+
+    # TODO: checking cache and config files
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir, exist_ok=True)
+
+    cache_filename = 'v#{}p#{}s#{}e#{}.npy'.format(video_id, participant_id, start_frame, end_frame)
+
+    if os.path.exists(os.path.join(cache_dir, cache_filename)) and not overwrite:
+        frames = np.load(os.path.join(cache_dir, cache_filename))
+
+    else: 
+
+        a = start_frame
+        frames = []
+        if ((end_frame-start_frame)/30)/processed_frame_number > threshold:
+            skip_interval = np.floor(((end_frame-start_frame)/30)/processed_frame_number)
+            skip_interval = int(skip_interval)
+        else:
+            skip_interval = 1
+
+        while a < end_frame:
+            # loading this frame
+            file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(a))[-10:]+'.jpg'
+            image_path = os.path.join(image_data_folder, file_path)
+            try:
+                bboxes = f2bbox[participant_id+'/' + video_id+ '/' + str(a)]
+            except KeyError:
+                a += 30 * skip_interval
+                print('skipping frame {} for participant {} video {}'.format(a, participant_id, video_id))
+                continue # this would ignorein all the cases where the bounding box doesn't exist
+            image = cv2.imread(image_path)
+            # resizing the image
+
+            valid_candidates = [bbox for bbox in bboxes if bbox['noun_class']==sample_dict['noun_class']]
+            if len(valid_candidates)==0 or valid_candidates[0] == '[]':
+                a+=30 * skip_interval
+                continue
+            else:
+                this_bbox = np.array(ast.literal_eval(valid_candidates[0]['bbox']))
+                # crop gt_bbox
+                if len(this_bbox) == 0:
+                    a += 30 * skip_interval
+                    continue
+                y, x, yd, xd = this_bbox[0]
+
+                rescaled_crop = cv2.resize(image[y:y+yd, x:x+xd, :], 
+                                    tuple([int(dim*scale) for dim in image.shape[:2][::-1]]))
+                frames.append(rescaled_crop)
+
+            a += 30 * skip_interval
+        frames = np.stack(frames, axis=3) # T x W x H x C # TODO: reshape needed?
+
+        # TODO: save cache
+        np.save(os.path.join(cache_dir, cache_filename), frames)
+        create_config_file(threshold, processed_frame_number, cache_dir=cache_dir)
+
+    return frames
+    
+
 
 def blackout_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2, 
-                cache_dir='dataloader_cache/backout_crop/', overwrite=False, scale = 0.5):
+                cache_dir='dataloader_cache/blackout_crop/', overwrite=False, scale=0.5):
 
     video_id = sample_dict['video_id']
     participant_id = sample_dict['participant_id']
@@ -103,7 +174,7 @@ def blackout_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder
                     continue
                 y, x, yd, xd = this_bbox[0]
                 y, x, yd, xd = int(y*scale), int(x*scale), int(yd*scale), int(xd*scale)
-                
+
                 image_black = np.zeros_like(image)
                 image_black[y: y+yd , x:x+xd, : ] = image[y:y+yd, x:x+xd, :]
                 frames.append(image_black)
@@ -127,7 +198,8 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             filter_function = default_filter_function,
             processed_frame_number = 20, 
             individual_transform=None,
-            pairwise_transform=None):
+            pairwise_transform=None,
+            crop_type='blackout'):
         # purpose of the dataset object: either for pretraining or for training/testing
         super(EK_Dataset_pretrain_pairwise, self).__init__()
         self.image_data_folder = image_data_folder
@@ -137,6 +209,8 @@ class EK_Dataset_pretrain_pairwise(Dataset):
         self.pairwise_transform = pairwise_transform
         self.num_samples = num_samples
         self.class_key_df = pd.read_csv(class_key_path)
+        self.crop_type = crop_type
+        assert crop_type == 'blackout' or crop_type == 'rescale', 'crop_type must either be blackout or rescale'
         # TODO: using the key, convert strings into unkowns
         self.class_key_dict = dict(zip(self.class_key_df.class_key, self.class_key_df.noun_id))
         self.noun_dict = dict(zip(self.class_key_df.noun_id, self.class_key_df.class_key))
@@ -179,9 +253,13 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             start_frame = sample_dict['start_frame']
             end_frame = sample_dict['end_frame']
 
-            frames = blackout_crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
-                                cache_dir='dataloader_cache/blackout_crop')
-
+            if self.crop_type == 'blackout':
+                frames = crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
+                                scale = 0.5, cache_dir='dataloader_cache/blackout_crop', mode=self.crop_type)
+            else:
+                frames = crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
+                                scale = 0.5, cache_dir='dataloader_cache/rescale_crop', mode=self.crop_type)
+            
             # get position in the tree
             encoding = get_tree_position(self.noun_dict[sample_dict['noun_class']], self.knowns)
             if encoding is None:
@@ -218,7 +296,8 @@ class EK_Dataset_pretrain(Dataset):
             image_data_folder,
             processed_frame_number = 20,
             filter_function = default_filter_function,
-            transform=None):
+            transform=None,
+            crop_type='blackout'):
         # purpose of the dataset object: either for pretraining or for training/testing
         super(EK_Dataset_pretrain, self).__init__()
         self.image_data_folder = image_data_folder
@@ -226,6 +305,8 @@ class EK_Dataset_pretrain(Dataset):
         self.unknowns = unknowns
         self.transform = transform
         self.class_key_df = pd.read_csv(class_key_path)
+        self.crop_type = crop_type
+        assert crop_type == 'blackout' or crop_type == 'rescale', 'crop_type must either be blackout or rescale'
         # TODO: using the key, convert strings into unkowns
         self.class_key_dict = dict(zip(self.class_key_df.class_key, self.class_key_df.noun_id))
         self.noun_dict = dict(zip(self.class_key_df.noun_id, self.class_key_df.class_key))
@@ -258,9 +339,13 @@ class EK_Dataset_pretrain(Dataset):
         start_frame = sample_dict['start_frame']
         end_frame = sample_dict['end_frame']
         
-        frames = blackout_crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
-                                cache_dir='dataloader_cache/blackout_crop')
-
+        if self.crop_type == 'blackout':
+                frames = crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
+                                scale = 0.5, cache_dir='dataloader_cache/blackout_crop', mode=self.crop_type)
+            else:
+                frames = crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
+                                scale = 0.5, cache_dir='dataloader_cache/rescale_crop', mode=self.crop_type)
+            
         # get position in the tree
         encoding = get_tree_position(self.noun_dict[sample_dict['noun_class']], self.knowns)
         if encoding is None:
