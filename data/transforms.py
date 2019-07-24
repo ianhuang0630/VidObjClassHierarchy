@@ -1,6 +1,7 @@
 """
 Implementations of different preprocessing transforms given to the dataloader
 """
+import torch.nn as nn 
 from torchvision import transforms
 import torchvision.models as models
 import torch
@@ -8,6 +9,8 @@ import cv2
 import numpy as np
 
 class Transpose(object):
+    """ TUrns H W 3 T  --> 3 T 1080 1920
+    """
     def __init__(self):
         pass
     def __call__(self, d):
@@ -36,10 +39,8 @@ class Rescale(object):
         for frame in frames:
             frames_resized.append(cv2.resize(frame, self.output_size[::-1]))
         frames_resized = np.stack(frames_resized, axis=3)
-
-        # TODO
-        # reshaping and resizing every single image
         new_d['frames'] = frames_resized
+        # output; 1080, 1920, 3, 11
         return new_d
 
 class TimeNormalize(object):
@@ -59,6 +60,7 @@ class TimeNormalize(object):
 class ToTensor(object):
     def __init__(self):
         pass
+
     def __call__(self, d):
         new_d = d.copy()
         for key_ in new_d:
@@ -66,32 +68,48 @@ class ToTensor(object):
                 new_d[key_] = torch.from_numpy(new_d[key_])
         return new_d
 
+class NormalizeVideo(object):
+    def __init__(self):
+        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+
+    def __call__(self, d):
+        assert 'frames' in d, 'need "frames" in d'
+        new_d = d.copy() # 3, 11, H, W 
+        frames = new_d['frames']
+        frames = frames.transpose(0,1).type(torch.FloatTensor)
+        normalized_frames = []
+        for frame in frames:
+            normalized = self.normalize(frame)
+            normalized_frames.append(normalized)
+        normalized_frames= torch.stack(normalized_frames, dim=3).transpose(2,3).transpose(1,2)
+
+        new_d['frames'] = normalized_frames # 3, 11, H, W 
+        return new_d
+        
 class BGR2RGB(object):
     def __init__ (self):
         pass
 
     def __call__(self, d):
-        pass
+        assert 'frames' in d, 'need "frames" in d'
+        new_d = d.copy()
+        new_d['frames'] = new_d['frames'][[2, 1, 0], :, :, :]
+        return new_d
 
-class GetResnet1024(object):
+class GetResnetFeats(object):
     def __init__(self):
         # instantiate network
         self.model = models.resnet18(pretrained=True)
-        
-        # make relevant transforms
-        # 0) transpose
-        # 1) BGR2RGB
-        convertRGB = BGR2RGB()
-        # 2) resize (224, 224)
-        rescale = Rescale((224, 224))
-        # 3) normalize values 
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225])
-        self.transforms = transforms.Compose(convertRGB,
-                                            rescale,)
-
+        self.model = nn.Sequential(*list(self.model.children())[:-2])
     def __call__(self, d):
-        pass
+        assert 'frames' in d, 'need "frames" in d'
+        new_d = d.copy()
+        frames = new_d['frames'].transpose(0,1)
+        with torch.no_grad():
+            new_d['frames']=self.model(frames)
+        new_d['frames']=new_d['frames'].transpose(0,1)
+        return new_d
 
 if __name__=='__main__':
     # first rescale
@@ -101,4 +119,6 @@ if __name__=='__main__':
                                             Transpose(),
                                             TimeNormalize(10),
                                             ToTensor()])
+
+    gr=GetResnetFeats()
 

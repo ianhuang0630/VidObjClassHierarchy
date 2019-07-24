@@ -116,7 +116,6 @@ def rescaling_crop(sample_dict, processed_frame_number, f2bbox, image_data_folde
         # TODO: save cache
         np.save(os.path.join(cache_dir, cache_filename), frames)
         create_config_file(threshold, processed_frame_number, cache_dir=cache_dir)
-
     return frames
     
 
@@ -184,7 +183,6 @@ def blackout_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder
         # TODO: save cache
         np.save(os.path.join(cache_dir, cache_filename), frames)
         create_config_file(threshold, processed_frame_number, cache_dir=cache_dir)
-
     return frames
 
 
@@ -255,10 +253,10 @@ class EK_Dataset_pretrain_pairwise(Dataset):
 
             if self.crop_type == 'blackout':
                 frames = crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
-                                scale = 0.5, cache_dir='dataloader_cache/blackout_crop', mode=self.crop_type)
+                                scaling = 0.5, cache_dir='dataloader_cache/blackout_crop', mode=self.crop_type)
             else:
                 frames = crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
-                                scale = 0.5, cache_dir='dataloader_cache/rescale_crop', mode=self.crop_type)
+                                scaling = 0.5, cache_dir='dataloader_cache/rescale_crop', mode=self.crop_type)
             
             # get position in the tree
             encoding = get_tree_position(self.noun_dict[sample_dict['noun_class']], self.knowns)
@@ -340,11 +338,11 @@ class EK_Dataset_pretrain(Dataset):
         end_frame = sample_dict['end_frame']
         
         if self.crop_type == 'blackout':
-                frames = crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
-                                scale = 0.5, cache_dir='dataloader_cache/blackout_crop', mode=self.crop_type)
-            else:
-                frames = crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
-                                scale = 0.5, cache_dir='dataloader_cache/rescale_crop', mode=self.crop_type)
+            frames = crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
+                                scaling = 0.5, cache_dir='dataloader_cache/blackout_crop', mode=self.crop_type)
+        else:
+            frames = crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
+                                scaling = 0.5, cache_dir='dataloader_cache/rescale_crop', mode=self.crop_type)
             
         # get position in the tree
         encoding = get_tree_position(self.noun_dict[sample_dict['noun_class']], self.knowns)

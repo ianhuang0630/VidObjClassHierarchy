@@ -114,8 +114,8 @@ def get_tree_position(class_, known_classes, tree_file='hierarchyV1.json'):
 # TODO: add required_training_knowns file, which contains the classes which 
 # must be in the training known section
 def get_known_unknown_split(tree_file='hierarchyV1.json', 
-                            required_training_knowns='EK_imagenet_intersection.txt',
-                            max_training_unknowns = 8):
+                            required_training_knowns='EK_Imagenet_intersection.txt',
+                            max_training_knowns = 8):
     """ gets the training/testing known/unknown split
     """
     # training knowns and unknowns
@@ -130,11 +130,12 @@ def get_known_unknown_split(tree_file='hierarchyV1.json',
             lines = f.read()
 
         required_training_knowns = [element for element in lines.split('\n') if len(element)>0]
-        if len(required_training_knowns) > max_training_unknowns:
+        if len(required_training_knowns) > max_training_knowns:
             # choose a subset of them
-            include_training_unknowns = list(np.random.choice(required_training_knowns, max_training_unknowns, replace=False)[0])
-            found = {element: False for element in include_training_unknowns}
-            training_unknowns.extend(include_training_unknowns)
+            include_training_knowns = np.random.choice(required_training_knowns, max_training_knowns, replace=False).tolist()
+            found = {element: False for element in include_training_knowns}
+    
+    import ipdb; ipdb.set_trace()
 
     assert os.path.exists(tree_file), '{} does not exist'.format(tree_file)
     with open(tree_file, 'r') as f:
@@ -148,8 +149,8 @@ def get_known_unknown_split(tree_file='hierarchyV1.json',
             this_branch_candidates = []
             num_required_training_unknowns = 0
             for layer3_class in subsubhierarchy:
-                # take out the ones that are reuqired training_unknowns
-                if layer3_class not in include_training_unknowns:
+                # take out the ones that are reuqired training_knowns
+                if layer3_class not in include_training_knowns and layer3_class not in required_training_knowns:
                     this_branch_candidates.append(layer3_class)
                 else:
                     num_required_training_unknowns += 1
@@ -158,22 +159,28 @@ def get_known_unknown_split(tree_file='hierarchyV1.json',
             random.shuffle(this_branch_candidates)
             # splitting into three even groups, in the following pirority order:
             # training known, testing unknown, training unknown
-
-            a = int(np.ceil((len(this_branch_candidates) + num_required_training_unknowns)/3.0))
-            if num_required_training_unknowns > a:
-                b = num_required_training_unknowns
-            else:
-                b = a - num_required_training_unknowns
-
-            training_unknown = this_branch_candidates [:b]
+        
+            
+            a = int(np.ceil(len(this_branch_candidates)/3.0))
+            # a = int(np.ceil((len(this_branch_candidates) + num_required_training_unknowns)/3.0))
+            # if num_required_training_unknowns > a:
+            #     b = num_required_training_unknowns
+            # else:
+            #     b = a - num_required_training_unknowns
+            
+            # TODO: FIX WASTE!!!
+            training_known = this_branch_candidates [:a]
+            training_knowns.extend(training_known)
+            training_unknown= this_branch_candidates [a:2*a]
             training_unknowns.extend(training_unknown)
-            testing_known = this_branch_candidates [b:2*a]
-            testing_knowns.extend(testing_known)
-            training_unknown = this_branch_candidates [2*a:]
-            training_unknowns.extend(training_unknown)
+            testing_unknown = this_branch_candidates [2*a:]
+            testing_unknowns.extend(testing_unknown)
+    
+     
+    training_knowns = include_training_knowns + np.random.choice(training_knowns, max_training_knowns - len(include_training_knowns), replace=False).tolist()
 
-    assert all(list(found.values())), 
-        'Some of the required training unknowns were not found in the hierarchy. Check spelling in original file.'
+    assert all(list(found.values())), \
+            '{} were not found in the hierarchy. Check spelling in original file.'.format([element for element in found if not found[element]])
 
     return {'training_unknown': training_unknowns,
             'training_known': training_knowns,

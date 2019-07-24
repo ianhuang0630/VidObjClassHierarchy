@@ -26,6 +26,7 @@ from tqdm import tqdm
 DEBUG = True
 USECUDA = True 
 MODE = 'pairwise'
+USERESNET = True
 
 def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01, 
         model_saveloc='models/pretraining_tree/pairwise'):
@@ -42,7 +43,7 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01
             frames_a = sample['frames_a']
             frames_b = sample['frames_b']
             tree_distance = sample['dist']
-
+            
             if USECUDA:
                 frames_a = frames_a.type(torch.FloatTensor).to('cuda:0')
                 frames_b = frames_b.type(torch.FloatTensor).to('cuda:0')
@@ -124,6 +125,7 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=1, lr=0.01,
 
 def save_training_config(path, args):
     config_dict = {'num_epochs': args.epochs,
+                    'num_samples': args.num_samples,
                     'rescale_imwidth': args.rescale_imwidth,
                     'rescale_imheight': args.rescale_imheight,
                     'time_normalized_dimension': args.time_normalized_dimension,
@@ -161,7 +163,7 @@ if __name__=='__main__':
                         help='the dimensionality of the embedding, output from the tree encoder')
     parser.add_argument('--num_samples', type=int, default=1000,
                         help='The number of pairwise samples, applicable only if the mode is "pairwise"')
-    parser.add_argument('--crop_mode', type=str, default='backout',
+    parser.add_argument('--crop_mode', type=str, default='blackout',
                         help='The mode for the crop done around the object of interest. Can either be blackout or rescale.')
     args = parser.parse_args()
 
@@ -201,14 +203,28 @@ if __name__=='__main__':
                 split = pickle.load(f)
     else:
         split = get_known_unknown_split()
+
     knowns = split['training_known']
     unknowns = split['training_unknown']
     # instantiating the dataloader
+    
+    # TOOD: transforms for the getting resnet features
+    resnet_trans_indiv= transforms.Compose([Rescale((224, 224)),
+                                        Transpose(),
+                                        TimeNormalize(time_normalized_dimension),
+                                        BGR2RGB(),
+                                        ToTensor(),
+                                        NormalizeVideo(),
+                                        GetResnetFeats(),
+                                        ToTensor() 
+                                        ])
+
     composed_trans_indiv = transforms.Compose([Rescale(image_normalized_dimensions),
                                         Transpose(),
                                         TimeNormalize(time_normalized_dimension),
                                         ToTensor()])
     composed_trans_pair = transforms.Compose([ToTensor()])
+    in_channels = 3 if not USERESNET else 512
 
     if MODE == 'individual':
         model_saveloc = os.path.join(args.model_folder, 'individual_run{}'.format(args.run_num))
@@ -221,13 +237,16 @@ if __name__=='__main__':
                 train_object_csvpath, train_action_csvpath,
                 class_key_csvpath, image_data_folder, 
                 processed_frame_number=time_normalized_dimension,  
-                transform=composed_trans_indiv,
+                transform=resnet_trans_indiv if USERESNET else composed_trans_indiv,
                 crop_type=args.crop_mode
                 ) 
         train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
                                 
         # model instatntiation and training
-        model = C3D(input_shape=(3, time_normalized_dimension, image_normalized_dimensions[0] , image_normalized_dimensions[1]), 
+        model = C3D(input_shape=(in_channels, 
+                    time_normalized_dimension, 
+                    image_normalized_dimensions[0] if not USERESNET else 7, 
+                    image_normalized_dimensions[1] if not USERESNET else 7), 
                     embedding_dim=args.embedding_dim) # TODO: replace these
         pretrain(model, train_dataloader, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
 
@@ -242,14 +261,17 @@ if __name__=='__main__':
                 train_object_csvpath, train_action_csvpath, 
                 class_key_csvpath, image_data_folder,
                 processed_frame_number=time_normalized_dimension, 
-                individual_transform=composed_trans_indiv, 
+                individual_transform=resnet_trans_indiv if USERESNET else composed_trans_indiv, 
                 pairwise_transform=composed_trans_pair,
                 num_samples=args.num_samples, 
                 crop_type=args.crop_mode
                 ) 
         train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
 
-        model = C3D(input_shape=(3, time_normalized_dimension, image_normalized_dimensions[0] , image_normalized_dimensions[1]), 
+        model = C3D(input_shape=(in_channels, 
+                    time_normalized_dimension, 
+                    image_normalized_dimensions[0] if not USERESNET else 7, 
+                    image_normalized_dimensions[1] if not USERESNET else 7), 
                     embedding_dim=args.embedding_dim) # TODO: replace these
         pretrain_pairwise(model, train_dataloader, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
     else:
