@@ -26,7 +26,7 @@ from tqdm import tqdm
 DEBUG = False 
 USECUDA = True 
 MODE = 'pairwise'
-USERESNET = True
+USERESNET = False # True
 
 def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01, 
         model_saveloc='models/pretraining_tree/pairwise'):
@@ -43,7 +43,7 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01
             frames_a = sample['frames_a']
             frames_b = sample['frames_b']
             tree_distance = sample['dist']
-            
+
             if USECUDA:
                 frames_a = frames_a.type(torch.FloatTensor).to('cuda:0')
                 frames_b = frames_b.type(torch.FloatTensor).to('cuda:0')
@@ -53,11 +53,14 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01
             optimizer.zero_grad()
             encoding_a = net(frames_a)
             encoding_b = net(frames_b)
-            loss= criterion(torch.sqrt(torch.diag(torch.matmul(
-                                            encoding_a - encoding_b,
-                                            (encoding_a - encoding_b).t()))),
-                            tree_distance)
-            loss_per_sample.append(loss.detach().cpu().numpy())
+            
+            loss= criterion(F.pairwise_distance(encoding_a, encoding_b),tree_distance)
+            # loss = criterion(torch.cat([encoding_a, encoding_b], dim=1), torch.zeros(4,6).to('cuda:0'))
+            # loss2 = criterion(torch.sqrt(torch.diag(torch.matmul(
+            #                                  encoding_a - encoding_b,
+            #                                  (encoding_a - encoding_b).t()))),
+            #                  tree_distance)
+            loss_per_sample.append(loss.data.cpu().numpy())
             loss.backward()
             optimizer.step()
 
@@ -125,6 +128,7 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=1, lr=0.01,
 
 def save_training_config(path, args, knowns):
     config_dict = {'known_classes': ','.join(knowns),
+                    'model_mode': args.model_mode,
                     'num_epochs': args.epochs,
                     'num_samples': args.num_samples,
                     'rescale_imwidth': args.rescale_imwidth,
@@ -135,7 +139,8 @@ def save_training_config(path, args, knowns):
                     'run_num': args.run_num,
                     'embedding_dimension': args.embedding_dim,
                     'crop_mode': args.crop_mode,
-                    'max_training_knowns': args.max_training_knowns}
+                    'max_training_knowns': args.max_training_knowns,
+                    'feature_extractor': args.feature_extractor}
     with open(path, 'w') as f:
         json.dump(config_dict, f)
     
@@ -169,6 +174,10 @@ if __name__=='__main__':
                         help='The mode for the crop done around the object of interest. Can either be blackout or rescale.')
     parser.add_argument('--max_training_knowns', type=int, default=8,
                         help='Effectively the number of known classes in the pretraining.')
+    parser.add_argument('--model_mode', type=str, default='simple',
+                        help='complexity of the model')
+    parser.add_argument('--feature_extractor', type=str, default='None',
+                        help='image-level feature extraction')
     args = parser.parse_args()
 
     # Setting up the paths
@@ -228,7 +237,12 @@ if __name__=='__main__':
                                         TimeNormalize(time_normalized_dimension),
                                         ToTensor()])
     composed_trans_pair = transforms.Compose([ToTensor()])
-    in_channels = 3 if not USERESNET else 512
+    in_channels = 3 if not args.feature_extractor=='resnet' else 512
+    
+    if args.model_mode == 'simple':
+        chosen_model_class = C3D_simplified
+    else:
+        chosen_model_class = C3D
 
     if MODE == 'individual':
         model_saveloc = os.path.join(args.model_folder, 'individual_run{}'.format(args.run_num))
@@ -241,16 +255,17 @@ if __name__=='__main__':
                 train_object_csvpath, train_action_csvpath,
                 class_key_csvpath, image_data_folder, 
                 processed_frame_number=time_normalized_dimension,  
-                transform=resnet_trans_indiv if USERESNET else composed_trans_indiv,
-                crop_type=args.crop_mode
+                transform=resnet_trans_indiv if args.feature_extractor=='resnet' else composed_trans_indiv,
+                crop_type=args.crop_mode,
+                mode='resnet' if args.feature_extractor=='resnet' else 'noresnet'
                 ) 
         train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
                                 
         # model instatntiation and training
-        model = C3D(input_shape=(in_channels, 
+        model = chosen_model_class(input_shape=(in_channels, 
                     time_normalized_dimension, 
-                    image_normalized_dimensions[0] if not USERESNET else 7, 
-                    image_normalized_dimensions[1] if not USERESNET else 7), 
+                    image_normalized_dimensions[0] if not args.feature_extractor=='resnet' else 7, 
+                    image_normalized_dimensions[1] if not args.feature_extractor=='resnet' else 7), 
                     embedding_dim=args.embedding_dim) # TODO: replace these
         pretrain(model, train_dataloader, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
 
@@ -265,17 +280,18 @@ if __name__=='__main__':
                 train_object_csvpath, train_action_csvpath, 
                 class_key_csvpath, image_data_folder,
                 processed_frame_number=time_normalized_dimension, 
-                individual_transform=resnet_trans_indiv if USERESNET else composed_trans_indiv, 
+                individual_transform=resnet_trans_indiv if args.feature_extractor=='resnet' else composed_trans_indiv, 
                 pairwise_transform=composed_trans_pair,
                 num_samples=args.num_samples, 
-                crop_type=args.crop_mode
+                crop_type=args.crop_mode,
+                mode='resnet' if args.feature_extractor=='resnet' else 'noresnet'
                 ) 
         train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
 
-        model = C3D(input_shape=(in_channels, 
+        model = chosen_model_class(input_shape=(in_channels, 
                     time_normalized_dimension, 
-                    image_normalized_dimensions[0] if not USERESNET else 7, 
-                    image_normalized_dimensions[1] if not USERESNET else 7), 
+                    image_normalized_dimensions[0] if not args.feature_extractor=='resnet' else 7, 
+                    image_normalized_dimensions[1] if not args.feature_extractor=='resnet' else 7), 
                     embedding_dim=args.embedding_dim) # TODO: replace these
         pretrain_pairwise(model, train_dataloader, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
     else:

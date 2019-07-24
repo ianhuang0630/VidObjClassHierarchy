@@ -6,12 +6,48 @@ import torch.nn as nn
 from torch.autograd import Variable
 import numpy as np
 
-class TreeEncoder(nn.Module):
-    def __init__(self):
-        super(TreeEncoder, self).__init__()
+class C3D_simplified(nn.Module):
+    def __init__(self, input_shape, embedding_dim=40):
+        super(C3D_simplified, self).__init__()
+        self.dropout=nn.Dropout(p=0.5)
+        self.relu = nn.ReLU()
+        self.softmax = nn.Softmax()
 
-    def foward(self, x):
-        pass
+        self.conv1 = nn.Conv3d(input_shape[0], 32, kernel_size=(3, 3, 3), padding=(1, 1, 1), stride=(2,2,2))
+        self.pool1 = nn.MaxPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2))
+
+        self.conv2 = nn.Conv3d(32, 16, kernel_size=(3, 3, 3), padding=(1, 1, 1), stride=(2,2,2))
+        self.pool2 = nn.MaxPool3d(kernel_size=(2, 2, 2), stride=(2, 2, 2))
+
+        self.flat_shape = self.get_flat_fts(input_shape, self.convs)
+        
+        self.fc6 = nn.Linear(self.flat_shape, 4096)
+        self.fc7 = nn.Linear(4096, 4096)
+        self.fc8 = nn.Linear(4096, embedding_dim)
+
+    def get_flat_fts(self, in_shape, fts):
+        f = fts(Variable(torch.ones(1,*in_shape)))
+        return int(np.prod(f.size()[1:]))
+
+    def convs(self, x):
+        h = self.relu(self.conv1(x))
+        h = self.pool1(h)
+
+        h = self.relu(self.conv2(h))
+        h = self.pool2(h)
+        return h
+
+    def forward(self, x):
+        h = self.convs(x)
+
+        h = h.view(-1, self.flat_shape)
+        h = self.relu(self.fc6(h))
+        h = self.dropout(h)
+        h = self.relu(self.fc7(h))
+        h = self.dropout(h)
+
+        embedding = self.fc8(h)
+        return embedding
 
 # from https://github.com/DavideA/c3d-pytorch/blob/master/C3D_model.py
 class C3D(nn.Module):
@@ -46,7 +82,7 @@ class C3D(nn.Module):
 
         # calculating the shape of the output layers
         self.flat_shape = self.get_flat_fts(input_shape, self.convs)
-
+        
         self.fc6 = nn.Linear(self.flat_shape, 4096)
         self.fc7 = nn.Linear(4096, 4096)
         self.fc8 = nn.Linear(4096, embedding_dim)
