@@ -135,8 +135,6 @@ def get_known_unknown_split(tree_file='hierarchyV1.json',
             include_training_knowns = np.random.choice(required_training_knowns, max_training_knowns, replace=False).tolist()
             found = {element: False for element in include_training_knowns}
     
-    import ipdb; ipdb.set_trace()
-
     assert os.path.exists(tree_file), '{} does not exist'.format(tree_file)
     with open(tree_file, 'r') as f:
         hierarchy = json.load(f)

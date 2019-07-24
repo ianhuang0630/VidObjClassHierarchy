@@ -197,7 +197,7 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             processed_frame_number = 20, 
             individual_transform=None,
             pairwise_transform=None,
-            mode='resnet', output_cache_folder='dataloader_cache/'
+            mode='resnet', output_cache_folder='dataloader_cache/', 
             crop_type='blackout'):
         # purpose of the dataset object: either for pretraining or for training/testing
         super(EK_Dataset_pretrain_pairwise, self).__init__()
@@ -246,8 +246,8 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             self.rand_selection_indices.append(selection_indices)
         
         self.output_cache_fullpath = os.path.join(os.path.join(self.output_cache_folder, self.mode + '_out'), self.crop_type)
-        if not os.path.exists(self.output_cache_folder):
-            os.makedirs(self.output_cache_folder, exist_ok = True)
+        if not os.path.exists(self.output_cache_fullpath):
+            os.makedirs(self.output_cache_fullpath, exist_ok = True)
 
     def __len__(self):
         return len(self.rand_selection_indices)

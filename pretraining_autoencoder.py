@@ -23,7 +23,7 @@ from tqdm import tqdm
 
 # dataloaders
 
-DEBUG = True
+DEBUG = False 
 USECUDA = True 
 MODE = 'pairwise'
 USERESNET = True
@@ -123,8 +123,9 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=1, lr=0.01,
 
     return net
 
-def save_training_config(path, args):
-    config_dict = {'num_epochs': args.epochs,
+def save_training_config(path, args, knowns):
+    config_dict = {'known_classes': ','.join(knowns),
+                    'num_epochs': args.epochs,
                     'num_samples': args.num_samples,
                     'rescale_imwidth': args.rescale_imwidth,
                     'rescale_imheight': args.rescale_imheight,
@@ -133,7 +134,8 @@ def save_training_config(path, args):
                     'batch_size': args.batch_size,
                     'run_num': args.run_num,
                     'embedding_dimension': args.embedding_dim,
-                    'crop_mode': args.crop_mode}
+                    'crop_mode': args.crop_mode,
+                    'max_training_knowns': args.max_training_knowns}
     with open(path, 'w') as f:
         json.dump(config_dict, f)
     
@@ -165,6 +167,8 @@ if __name__=='__main__':
                         help='The number of pairwise samples, applicable only if the mode is "pairwise"')
     parser.add_argument('--crop_mode', type=str, default='blackout',
                         help='The mode for the crop done around the object of interest. Can either be blackout or rescale.')
+    parser.add_argument('--max_training_knowns', type=int, default=8,
+                        help='Effectively the number of known classes in the pretraining.')
     args = parser.parse_args()
 
     # Setting up the paths
@@ -192,7 +196,7 @@ if __name__=='__main__':
     # splitting known and unknown data
     if DEBUG:
         if not os.path.exists('current_split.pkl'):
-            split = get_known_unknown_split()
+            split = get_known_unknown_split(max_training_knowns=args.max_training_knowns)
             # saving into 'current_split.pkl'
             with open('current_split.pkl', 'wb') as f:
                 pickle.dump(split, f)
@@ -202,7 +206,7 @@ if __name__=='__main__':
             with open('current_split.pkl', 'rb') as f:
                 split = pickle.load(f)
     else:
-        split = get_known_unknown_split()
+        split = get_known_unknown_split(max_training_knowns=args.max_training_knowns)
 
     knowns = split['training_known']
     unknowns = split['training_unknown']
@@ -231,7 +235,7 @@ if __name__=='__main__':
         if not os.path.exists(model_saveloc):
             os.makedirs(model_saveloc, exist_ok=True)
 
-        save_training_config(os.path.join(model_saveloc, 'config.json'), args)
+        save_training_config(os.path.join(model_saveloc, 'config.json'), args, knowns)
 
         DF = EK_Dataset_pretrain(knowns, unknowns,
                 train_object_csvpath, train_action_csvpath,
@@ -255,7 +259,7 @@ if __name__=='__main__':
         if not os.path.exists(model_saveloc):
             os.makedirs(model_saveloc, exist_ok=True)
 
-        save_training_config(os.path.join(model_saveloc, 'config.json'), args)
+        save_training_config(os.path.join(model_saveloc, 'config.json'), args, knowns)
 
         DF = EK_Dataset_pretrain_pairwise(knowns, unknowns,
                 train_object_csvpath, train_action_csvpath, 
