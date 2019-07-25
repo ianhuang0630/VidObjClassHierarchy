@@ -64,8 +64,10 @@ class ToTensor(object):
     def __call__(self, d):
         new_d = d.copy()
         for key_ in new_d:
-            if type(new_d[key_]) is np.ndarray:
+            if type(new_d[key_]) is np.ndarray: 
                 new_d[key_] = torch.from_numpy(new_d[key_])
+            elif type(new_d[key_]) is int:
+                new_d[key_] = torch.Tensor([new_d[key_]])
         return new_d
 
 class NormalizeVideo(object):

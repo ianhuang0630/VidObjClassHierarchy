@@ -28,11 +28,10 @@ USECUDA = True
 MODE = 'pairwise'
 USERESNET = False # True
 
-def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01, 
+def pretrain_pairwise(net, dataloader, valset, num_epochs=10, save_interval=1, lr = 0.01, 
         model_saveloc='models/pretraining_tree/pairwise'):
     if not os.path.exists(model_saveloc):
         os.makedirs(model_saveloc, exist_ok=True)
-    val_set = dataloader.get_val_dataset()
 
     criterion = nn.MSELoss()
     optimizer = torch.optim.SGD(net.parameters(), lr)
@@ -67,12 +66,16 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01
                 with open(os.path.join(model_saveloc, 'training_losses.pkl'.format(epoch)), 
                             'wb') as f:
                     pickle.dump(loss_per_sample, f)
-                # validate on val_set
+                
+                
+                
+                # validate on valset 
                 val_losses = []
-                for val_sample in val_set:
-                    val_frames_a = val_sample['frames_a']
-                    val_frames_b = val_sample['frames_b']
-                    val_tree_distance = val_sample['dist']
+                for val_sample in valset:
+
+                    val_frames_a = torch.stack([element['frames_a'] for element in val_sample])
+                    val_frames_b = torch.stack([element['frames_b'] for element in  val_sample])
+                    val_tree_distance = torch.stack([element['dist'] for element in val_sample])
                     if USECUDA:
                         val_frames_a = val_frames_a.type(torch.FloatTensor).to('cuda:0')
                         val_frames_b = val_frames_b.type(torch.FloatTensor).to('cuda:0')
@@ -86,6 +89,10 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01
                         val_losses.append(val_loss.data.cpu().numpy())
                 val_losses_per10.append(np.mean(val_losses))
                 
+                with open(os.path.join(model_saveloc, 'validation_losses.pkl'.format(epoch)), 
+                            'wb') as f:
+                    pickle.dump(val_losses_per10, f)
+
             counter += 1
 
         if epoch % save_interval == 0:
@@ -304,6 +311,7 @@ if __name__=='__main__':
                 crop_type=args.crop_mode,
                 mode='resnet' if args.feature_extractor=='resnet' else 'noresnet'
                 ) 
+        valset = DF.get_val_dataset()
         train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
 
         model = chosen_model_class(input_shape=(in_channels, 
@@ -311,6 +319,6 @@ if __name__=='__main__':
                     image_normalized_dimensions[0] if not args.feature_extractor=='resnet' else 7, 
                     image_normalized_dimensions[1] if not args.feature_extractor=='resnet' else 7), 
                     embedding_dim=args.embedding_dim) # TODO: replace these
-        pretrain_pairwise(model, train_dataloader, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
+        pretrain_pairwise(model, train_dataloader, valset, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
     else:
         raise ValueError('invalid mode')

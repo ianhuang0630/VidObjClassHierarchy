@@ -257,10 +257,16 @@ class EK_Dataset_pretrain_pairwise(Dataset):
 
     def get_val_dataset(self):
         val_set = []
-        for val_index in self.val_indices:
-            sample_a = self.training_data[val_index[0]]
-            sample_b = self.training_data[val_index[1]]
-            val_set.append(self.process(sample_a, sample_b))
+        counter = 0
+        
+        for i in range(int(len(self.val_indices)/4)):
+            sample_batch = []
+            for val_index in self.val_indices[i*4 : i*4 + 4]:
+                sample_a = self.training_data[val_index[0]]
+                sample_b = self.training_data[val_index[1]]
+                sample_batch.append(self.process(sample_a, sample_b))
+            val_set.append(sample_batch)
+
         return val_set
 
     def process(self, sample_a, sample_b):
