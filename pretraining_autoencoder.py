@@ -28,13 +28,17 @@ USECUDA = True
 MODE = 'pairwise'
 USERESNET = False # True
 
-def pretrain_pairwise(net, dataloader, valset, num_epochs=10, save_interval=1, lr = 0.01, 
+def pretrain_pairwise(net, dataloader, valset, optimizer_type='sgd', num_epochs=10, save_interval=1, lr = 0.01, 
         model_saveloc='models/pretraining_tree/pairwise'):
     if not os.path.exists(model_saveloc):
         os.makedirs(model_saveloc, exist_ok=True)
 
     criterion = nn.MSELoss()
-    optimizer = torch.optim.SGD(net.parameters(), lr)
+    if optimizer_type=='sgd':
+        optimizer = torch.optim.SGD(net.parameters(), lr)
+    elif optimizer_type == 'adam'
+        optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+
     counter = 0
     loss_per_sample = []
     val_losses_per10 = []
@@ -104,14 +108,18 @@ def pretrain_pairwise(net, dataloader, valset, num_epochs=10, save_interval=1, l
                 'net_epoch{}.pth'.format(epoch)))
     return net
 
-def pretrain(net, dataloader, num_epochs=10, save_interval=1, lr=0.01,
+def pretrain(net, dataloader, optimizer_type='sgd', num_epochs=10, save_interval=1, lr=0.01,
         model_saveloc='models/pretraining_tree/single'):
     if not os.path.exists(model_saveloc):
         os.makedirs(model_saveloc, exist_ok=True)
     # define cost
     criterion = nn.MSELoss() 
     # optimizer
-    optimizer = torch.optim.SGD(net.parameters(), lr)
+    
+    if optimizer_type=='sgd':
+        optimizer = torch.optim.SGD(net.parameters(), lr)
+    elif optimizer_type == 'adam'
+        optimizer = torch.optim.Adam(net.parameters(), lr=lr)
     loss_per_sample = []
     counter = 0
     # TODO iterate through the dataset, 10 epochs
@@ -152,20 +160,21 @@ def pretrain(net, dataloader, num_epochs=10, save_interval=1, lr=0.01,
     return net
 
 def save_training_config(path, args, knowns):
-    config_dict = {'known_classes': ','.join(knowns),
+    config_dict = { 'run_num': args.run_num,
+                    'max_training_knowns': args.max_training_knowns,
+                    'known_classes': ','.join(knowns),
                     'model_mode': args.model_mode,
                     'num_epochs': args.epochs,
                     'num_samples': args.num_samples,
+                    'batch_size': args.batch_size,
+                    'lr': args.lr,
                     'rescale_imwidth': args.rescale_imwidth,
                     'rescale_imheight': args.rescale_imheight,
                     'time_normalized_dimension': args.time_normalized_dimension,
-                    'lr': args.lr,
-                    'batch_size': args.batch_size,
-                    'run_num': args.run_num,
                     'embedding_dimension': args.embedding_dim,
                     'crop_mode': args.crop_mode,
-                    'max_training_knowns': args.max_training_knowns,
-                    'feature_extractor': args.feature_extractor}
+                    'feature_extractor': args.feature_extractor,
+                    'optimizer_type': args.optimizer}
     with open(path, 'w') as f:
         json.dump(config_dict, f)
     
@@ -203,6 +212,8 @@ if __name__=='__main__':
                         help='complexity of the model')
     parser.add_argument('--feature_extractor', type=str, default='None',
                         help='image-level feature extraction')
+    parser.add_argument('--optimizer', type=str, default='sgd',
+                        help='type of optimizer to use')
     args = parser.parse_args()
 
     # Setting up the paths
@@ -226,6 +237,8 @@ if __name__=='__main__':
 
     image_normalized_dimensions = (args.rescale_imheight, args.rescale_imwidth)
     time_normalized_dimension = args.time_normalized_dimension
+
+    assert args.optimizer == 'sgd' or args.optimizer == 'adam'
 
     # splitting known and unknown data
     if DEBUG:
@@ -292,7 +305,7 @@ if __name__=='__main__':
                     image_normalized_dimensions[0] if not args.feature_extractor=='resnet' else 7, 
                     image_normalized_dimensions[1] if not args.feature_extractor=='resnet' else 7), 
                     embedding_dim=args.embedding_dim) # TODO: replace these
-        pretrain(model, train_dataloader, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
+        pretrain(model, train_dataloader, optimizer_type=args.optimizer, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
 
     elif MODE == 'pairwise':
         model_saveloc = os.path.join(args.model_folder, 'pairwise_run{}'.format(args.run_num))
@@ -319,6 +332,6 @@ if __name__=='__main__':
                     image_normalized_dimensions[0] if not args.feature_extractor=='resnet' else 7, 
                     image_normalized_dimensions[1] if not args.feature_extractor=='resnet' else 7), 
                     embedding_dim=args.embedding_dim) # TODO: replace these
-        pretrain_pairwise(model, train_dataloader, valset, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
+        pretrain_pairwise(model, train_dataloader, valset, optimizer_type=args.optimizer, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
     else:
         raise ValueError('invalid mode')
