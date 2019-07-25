@@ -7,6 +7,7 @@ DEBUG = True
 if DEBUG:
     random.seed(7)
     np.random.seed(7)
+    force_feed = ['kale', 'cherry']
 
 def tree_dist(loc1, loc2):
     lock = False
@@ -122,7 +123,10 @@ def get_known_unknown_split(tree_file='hierarchyV1.json',
     # testing unknowns
     training_unknowns = []
     testing_unknowns = []
-    training_knowns = []
+    training_knowns = [] if not DEBUG else force_feed
+    if DEBUG:
+        print('WARNING WE ARE FORCE FEEDING')
+        max_training_knowns=len(force_feed)
 
     if required_training_knowns is not None:
         # loading the required training known classes
