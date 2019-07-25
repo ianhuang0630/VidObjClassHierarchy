@@ -192,7 +192,8 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             action_data_path,
             class_key_path,
             image_data_folder,
-            num_samples=10000,
+            training_num_samples=10000,
+            validation_num_samples=200,
             filter_function = default_filter_function,
             processed_frame_number = 20, 
             individual_transform=None,
@@ -206,7 +207,9 @@ class EK_Dataset_pretrain_pairwise(Dataset):
         self.unknowns = unknowns
         self.individual_transform = individual_transform
         self.pairwise_transform = pairwise_transform
-        self.num_samples = num_samples
+        self.train_num_samples = training_num_samples
+        self.val_num_samples = validation_num_samples
+
         self.class_key_df = pd.read_csv(class_key_path)
 
         self.mode = mode
@@ -241,21 +244,26 @@ class EK_Dataset_pretrain_pairwise(Dataset):
 
         # naive sampling of pairwise
         self.rand_selection_indices = []
-        for i in range(num_samples):
+        for i in range(self.train_num_samples + self.val_num_samples):
             selection_indices = list(np.random.choice(len(self.training_data), 2))
             self.rand_selection_indices.append(selection_indices)
+        
+        self.val_indices = self.rand_selection_indices[self.train_num_samples:]
+        self.rand_selection_indices = self.rand_selection_indices[:self.train_num_samples]
         
         self.output_cache_fullpath = os.path.join(os.path.join(self.output_cache_folder, self.mode + '_out'), self.crop_type)
         if not os.path.exists(self.output_cache_fullpath):
             os.makedirs(self.output_cache_fullpath, exist_ok = True)
 
-    def __len__(self):
-        return len(self.rand_selection_indices)
+    def get_val_dataset(self):
+        val_set = []
+        for val_index in self.val_indices:
+            sample_a = self.training_data[val_index[0]]
+            sample_b = self.training_data[val_index[1]]
+            val_set.append(self.process(sample_a, sample_b))
+        return val_set
 
-    def __getitem__(self, idx):
-        sample_a = self.training_data[self.rand_selection_indices[idx][0]]
-        sample_b = self.training_data[self.rand_selection_indices[idx][1]]
-
+    def process(self, sample_a, sample_b):
         indiv_output_d = []
         for sample_dict in [sample_a, sample_b]:
             video_id = sample_dict['video_id']
@@ -314,6 +322,16 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             output = self.pairwise_transform(output)
         
         return output
+
+    def __len__(self):
+        return len(self.rand_selection_indices)
+
+    def __getitem__(self, idx):
+        sample_a = self.training_data[self.rand_selection_indices[idx][0]]
+        sample_b = self.training_data[self.rand_selection_indices[idx][1]]
+
+        return self.process(sample_a, sample_b)
+        
 
 class EK_Dataset_pretrain(Dataset):
     def __init__(self, knowns, unknowns,

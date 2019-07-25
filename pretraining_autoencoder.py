@@ -32,10 +32,13 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01
         model_saveloc='models/pretraining_tree/pairwise'):
     if not os.path.exists(model_saveloc):
         os.makedirs(model_saveloc, exist_ok=True)
+    val_set = dataloader.get_val_dataset()
+
     criterion = nn.MSELoss()
     optimizer = torch.optim.SGD(net.parameters(), lr)
     counter = 0
     loss_per_sample = []
+    val_losses_per10 = []
     for epoch in range(num_epochs):
         print('training on epoch {}'.format(epoch))
         for i, sample in enumerate(tqdm(dataloader)):
@@ -54,12 +57,8 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01
             encoding_a = net(frames_a)
             encoding_b = net(frames_b)
             
-            loss= criterion(F.pairwise_distance(encoding_a, encoding_b),tree_distance)
-            # loss = criterion(torch.cat([encoding_a, encoding_b], dim=1), torch.zeros(4,6).to('cuda:0'))
-            # loss2 = criterion(torch.sqrt(torch.diag(torch.matmul(
-            #                                  encoding_a - encoding_b,
-            #                                  (encoding_a - encoding_b).t()))),
-            #                  tree_distance)
+            loss = criterion(F.pairwise_distance(encoding_a, encoding_b),tree_distance)
+
             loss_per_sample.append(loss.data.cpu().numpy())
             loss.backward()
             optimizer.step()
@@ -68,6 +67,25 @@ def pretrain_pairwise(net, dataloader, num_epochs=10, save_interval=1, lr = 0.01
                 with open(os.path.join(model_saveloc, 'training_losses.pkl'.format(epoch)), 
                             'wb') as f:
                     pickle.dump(loss_per_sample, f)
+                # validate on val_set
+                val_losses = []
+                for val_sample in val_set:
+                    val_frames_a = val_sample['frames_a']
+                    val_frames_b = val_sample['frames_b']
+                    val_tree_distance = val_sample['dist']
+                    if USECUDA:
+                        val_frames_a = val_frames_a.type(torch.FloatTensor).to('cuda:0')
+                        val_frames_b = val_frames_b.type(torch.FloatTensor).to('cuda:0')
+                        val_tree_distance = val_tree_distance.type(torch.FloatTensor).to('cuda:0')
+                        net = net.to('cuda:0')
+                    with torch.no_grad():
+                        val_encoding_a = net(val_frames_a)
+                        val_encoding_b = net(val_frames_b)
+                        val_loss = criterion(F.pairwise_distance(val_encoding_a, val_encoding_b),
+                                val_tree_distance)
+                        val_losses.append(val_loss.data.cpu().numpy())
+                val_losses_per10.append(np.mean(val_losses))
+                
             counter += 1
 
         if epoch % save_interval == 0:
@@ -282,7 +300,7 @@ if __name__=='__main__':
                 processed_frame_number=time_normalized_dimension, 
                 individual_transform=resnet_trans_indiv if args.feature_extractor=='resnet' else composed_trans_indiv, 
                 pairwise_transform=composed_trans_pair,
-                num_samples=args.num_samples, 
+                training_num_samples=args.num_samples, 
                 crop_type=args.crop_mode,
                 mode='resnet' if args.feature_extractor=='resnet' else 'noresnet'
                 ) 
