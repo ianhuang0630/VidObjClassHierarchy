@@ -7,7 +7,7 @@ DEBUG = True
 if DEBUG:
     random.seed(7)
     np.random.seed(7)
-    force_feed = ['kale', 'cherry']
+    force_feed = ['chicken', 'carrot']
 
 def tree_dist(loc1, loc2):
     lock = False
@@ -123,7 +123,7 @@ def get_known_unknown_split(tree_file='hierarchyV1.json',
     # testing unknowns
     training_unknowns = []
     testing_unknowns = []
-    training_knowns = [] if not DEBUG else force_feed
+    training_knowns = [] 
     if DEBUG:
         print('WARNING WE ARE FORCE FEEDING')
         max_training_knowns=len(force_feed)
@@ -136,7 +136,7 @@ def get_known_unknown_split(tree_file='hierarchyV1.json',
         required_training_knowns = [element for element in lines.split('\n') if len(element)>0]
         if len(required_training_knowns) > max_training_knowns:
             # choose a subset of them
-            include_training_knowns = np.random.choice(required_training_knowns, max_training_knowns, replace=False).tolist()
+            include_training_knowns = np.random.choice(required_training_knowns, max_training_knowns, replace=False).tolist() if not DEBUG else force_feed
             found = {element: False for element in include_training_knowns}
     
     assert os.path.exists(tree_file), '{} does not exist'.format(tree_file)
