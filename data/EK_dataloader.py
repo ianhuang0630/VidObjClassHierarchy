@@ -192,6 +192,7 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             action_data_path,
             class_key_path,
             image_data_folder,
+            model_saveloc,
             training_num_samples=10000,
             validation_num_samples=200,
             filter_function = default_filter_function,
@@ -255,6 +256,23 @@ class EK_Dataset_pretrain_pairwise(Dataset):
         if not os.path.exists(self.output_cache_fullpath):
             os.makedirs(self.output_cache_fullpath, exist_ok = True)
 
+        self.unknown_lowest_level_label = survey_tree(self.knowns)
+
+
+        # saving processing_params.pkl
+        with open(os.path.join(model_saveloc, 'processing_params.pkl'),'wb') as f:
+            pickle.dump({'output_cache_fullpath': self.output_cache_fullpath, 
+                        'crop_type': self.crop_type, 
+                        'processed_frame_number': self.processed_frame_number,
+                        'f2bbox': self.f2bbox, 
+                        'image_data_folder': self.image_data_folder, 
+                        'noun_dict': self.noun_dict, 
+                        'knowns': self.knowns, 
+                        'unknowns': self.unknowns, 
+                        'unknown_lowest_level_label': self.unknown_lowest_level_label, 
+                        'individual_transform': self.individual_transform, 
+                        'pairwise_transform': self.pairwise_transform}, f )
+
     def get_val_dataset(self):
         val_set = []
         counter = 0
@@ -264,12 +282,19 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             for val_index in self.val_indices[i*4 : i*4 + 4]:
                 sample_a = self.training_data[val_index[0]]
                 sample_b = self.training_data[val_index[1]]
-                sample_batch.append(self.process(sample_a, sample_b))
+                sample_batch.append(EK_Dataset_pretrain_pairwise.process(sample_a, sample_b, self.output_cache_fullpath, self.crop_type, 
+                                                self.processed_frame_number, self.f2bbox, 
+                                                self.image_data_folder, self.noun_dict, self.knowns, 
+                                                self.unknowns, self.unknown_lowest_level_label, 
+                                                self.individual_transform, self.pairwise_transform))
             val_set.append(sample_batch)
 
         return val_set
 
-    def process(self, sample_a, sample_b):
+    @staticmethod
+    def process(sample_a, sample_b, output_cache_fullpath, crop_type, processed_frame_number,f2bbox, 
+                image_data_folder, noun_dict, knowns, unknowns, unknown_lowest_level_label, 
+                individual_transform, pairwise_transform):
         indiv_output_d = []
         for sample_dict in [sample_a, sample_b]:
             video_id = sample_dict['video_id']
@@ -279,37 +304,37 @@ class EK_Dataset_pretrain_pairwise(Dataset):
 
             # TODO: make cache name, search for cache file, if found load.
             cache_filename = 'v#{}p#{}s#{}e#{}.pkl'.format(video_id, participant_id, start_frame, end_frame)
-            if os.path.exists(os.path.join(self.output_cache_fullpath, cache_filename)):
+            if os.path.exists(os.path.join(output_cache_fullpath, cache_filename)):
                 # loding d
-                with open(os.path.join(self.output_cache_fullpath, cache_filename), 'rb') as f:
+                with open(os.path.join(output_cache_fullpath, cache_filename), 'rb') as f:
                     d = pickle.load(f)
                 indiv_output_d.append(d)
 
             else:
 
-                if self.crop_type == 'blackout':
-                    frames = crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
-                                    scaling = 0.5, cache_dir='dataloader_cache/blackout_crop', mode=self.crop_type)
-                else:
-                    frames = crop_wrapper(sample_dict, self.processed_frame_number, self.f2bbox, self.image_data_folder, threshold=2, 
-                                    scaling = 0.5, cache_dir='dataloader_cache/rescale_crop', mode=self.crop_type)
+                if crop_type == 'blackout':
+                    frames = crop_wrapper(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2, 
+                                    scaling = 0.5, cache_dir='dataloader_cache/blackout_crop', mode=crop_type)
+                
+                    frames = crop_wrapper(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2, 
+                                    scaling = 0.5, cache_dir='dataloader_cache/rescale_crop', mode=crop_type)
                 
                 # get position in the tree
-                encoding = get_tree_position(self.noun_dict[sample_dict['noun_class']], self.knowns)
+                encoding = get_tree_position(noun_dict[sample_dict['noun_class']], knowns)
                 if encoding is None:
-                    top_levels = tuple(get_tree_position(self.noun_dict[sample_dict['noun_class']], self.unknowns)[:-1])
-                    assert top_levels in self.unknown_lowest_level_label
-                    encoding = np.array(list(top_levels)+[self.unknown_lowest_level_label[top_levels][0]])
+                    top_levels = tuple(get_tree_position(noun_dict[sample_dict['noun_class']], unknowns)[:-1])
+                    assert top_levels in unknown_lowest_level_label
+                    encoding = np.array(list(top_levels)+[unknown_lowest_level_label[top_levels][0]])
 
                 d = {'frames': frames,
-                     'noun_label': self.noun_dict[sample_dict['noun_class']],
+                     'noun_label': noun_dict[sample_dict['noun_class']],
                      'hierarchy_encoding': encoding}
 
-                if self.individual_transform is not None:
-                    d = self.individual_transform(d)
+                if individual_transform is not None:
+                    d = individual_transform(d)
 
                 # saving into cache file
-                with open(os.path.join(self.output_cache_fullpath, cache_filename), 'wb') as f:
+                with open(os.path.join(output_cache_fullpath, cache_filename), 'wb') as f:
                     pickle.dump(d, f)
 
                 indiv_output_d.append(d)
@@ -324,8 +349,8 @@ class EK_Dataset_pretrain_pairwise(Dataset):
                     'noun_label_b': indiv_output_d[1]['noun_label'],
                     'dist': pairwise_tree_dist}
 
-        if self.pairwise_transform is not None:
-            output = self.pairwise_transform(output)
+        if pairwise_transform is not None:
+            output = pairwise_transform(output)
         
         return output
 
@@ -336,7 +361,9 @@ class EK_Dataset_pretrain_pairwise(Dataset):
         sample_a = self.training_data[self.rand_selection_indices[idx][0]]
         sample_b = self.training_data[self.rand_selection_indices[idx][1]]
 
-        return self.process(sample_a, sample_b)
+        return EK_Dataset_pretrain_pairwise.process(sample_a, sample_b, self.output_cache_fullpath, self.crop_type, self.processed_frame_number, self.f2bbox, 
+                self.image_data_folder, self.noun_dict, self.knowns, self.unknowns, self.unknown_lowest_level_label, 
+                self.individual_transform, self.pairwise_transform)
         
 
 class EK_Dataset_pretrain(Dataset):
@@ -379,6 +406,7 @@ class EK_Dataset_pretrain(Dataset):
 
         # used to handle cases when the clip is espeically long
         self.processed_frame_number = processed_frame_number
+        self.unknown_lowest_level_label = survey_tree(self.knowns)
 
     def __len__(self):
         return len(self.training_data)
