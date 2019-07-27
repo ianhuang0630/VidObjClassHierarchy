@@ -36,7 +36,7 @@ def pretrain_pairwise(net, dataloader, valset, optimizer_type='sgd', num_epochs=
     criterion = nn.MSELoss()
     if optimizer_type=='sgd':
         optimizer = torch.optim.SGD(net.parameters(), lr)
-    elif optimizer_type == 'adam'
+    elif optimizer_type == 'adam':
         optimizer = torch.optim.Adam(net.parameters(), lr=lr)
 
     counter = 0
@@ -118,7 +118,7 @@ def pretrain(net, dataloader, optimizer_type='sgd', num_epochs=10, save_interval
     
     if optimizer_type=='sgd':
         optimizer = torch.optim.SGD(net.parameters(), lr)
-    elif optimizer_type == 'adam'
+    elif optimizer_type == 'adam':
         optimizer = torch.optim.Adam(net.parameters(), lr=lr)
     loss_per_sample = []
     counter = 0
@@ -179,7 +179,7 @@ def save_training_config(path, args, knowns):
         json.dump(config_dict, f)
     
 
-if __name__=='__main__':
+if __name__=='__main__': 
 
     # argparse
     parser = argparse.ArgumentParser(description='PyTorch hierarchy embedding pretraining')
@@ -317,6 +317,7 @@ if __name__=='__main__':
         DF = EK_Dataset_pretrain_pairwise(knowns, unknowns,
                 train_object_csvpath, train_action_csvpath, 
                 class_key_csvpath, image_data_folder,
+                model_saveloc,
                 processed_frame_number=time_normalized_dimension, 
                 individual_transform=resnet_trans_indiv if args.feature_extractor=='resnet' else composed_trans_indiv, 
                 pairwise_transform=composed_trans_pair,
@@ -326,6 +327,11 @@ if __name__=='__main__':
                 ) 
         valset = DF.get_val_dataset()
         train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
+        # saving object DF in the model folder
+
+        # now save DF.training_data, as well as DF.val_indices and DF.random_selection_indices
+        with open(os.path.join(model_saveloc, 'data_info.pkl'), 'wb') as f:
+            pickle.dump({'all_data': DF.training_data, 'train_indices': DF.rand_selection_indices, 'val_indices': DF.val_indices}, f)
 
         model = chosen_model_class(input_shape=(in_channels, 
                     time_normalized_dimension, 
