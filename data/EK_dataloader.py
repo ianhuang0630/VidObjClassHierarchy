@@ -200,6 +200,7 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             individual_transform=None,
             pairwise_transform=None,
             mode='resnet', output_cache_folder='dataloader_cache/', 
+            snip_threshold=32,
             crop_type='blackout'):
         # purpose of the dataset object: either for pretraining or for training/testing
         super(EK_Dataset_pretrain_pairwise, self).__init__()
@@ -218,7 +219,7 @@ class EK_Dataset_pretrain_pairwise(Dataset):
         self.output_cache_folder = output_cache_folder
         if not os.path.exists(self.output_cache_folder):
             os.makedirs(self.output_cache_folder, exist_ok = True)
-
+        self.snip_threshold = snip_threshold
         self.crop_type = crop_type
         assert crop_type == 'blackout' or crop_type == 'rescale', 'crop_type must either be blackout or rescale'
         # TODO: using the key, convert strings into unkowns
@@ -232,6 +233,9 @@ class EK_Dataset_pretrain_pairwise(Dataset):
         assert 'unknown_frame2bbox' in self.dataset \
                 and 'known_frame2bbox' in self.dataset, 'frame2bbox conversion not found'
         self.training_data = self.dataset['known_pretrain']
+
+        self.snip_clips()
+
         buffer_ = []
         for idx, sample in enumerate(self.training_data):
             if filter_function(sample):
@@ -239,18 +243,21 @@ class EK_Dataset_pretrain_pairwise(Dataset):
         self.training_data = buffer_
         del buffer_
         self.f2bbox = self.dataset['known_frame2bbox']
-        
+
         # used to handle cases when the clip is especially long
         self.processed_frame_number = processed_frame_number
 
-        # naive sampling of pairwise
-        self.rand_selection_indices = []
-        for i in range(self.train_num_samples + self.val_num_samples):
-            selection_indices = list(np.random.choice(len(self.training_data), 2))
-            self.rand_selection_indices.append(selection_indices)
+        self.rand_selection_indices = [np.random.choice(int(len(self.training_data)*0.8),2, replace=False).tolist() for i in range(self.train_num_samples)]
+        self.val_indices = [[element[0] + int(len(self.training_data)*0.8), element[1] + int(len(self.training_data)*0.8)] for element in \
+                    [list(np.random.choice(len(self.training_data) - int (len(self.training_data)*0.8), 2, replace=False)) for i in range(self.val_num_samples)]]
+        # # naive sampling of pairwise
+        # self.rand_selection_indices = []
+        # for i in range(self.train_num_samples + self.val_num_samples):
+        #     selection_indices = list(np.random.choice(len(self.training_data), 2))
+        #     self.rand_selection_indices.append(selection_indices)
         
-        self.val_indices = self.rand_selection_indices[self.train_num_samples:]
-        self.rand_selection_indices = self.rand_selection_indices[:self.train_num_samples]
+        # self.val_indices = self.rand_selection_indices[self.train_num_samples:]
+        # self.rand_selection_indices = self.rand_selection_indices[:self.train_num_samples]
         
         self.output_cache_fullpath = os.path.join(os.path.join(self.output_cache_folder, self.mode + '_out'), self.crop_type)
         if not os.path.exists(self.output_cache_fullpath):
@@ -272,6 +279,26 @@ class EK_Dataset_pretrain_pairwise(Dataset):
                         'unknown_lowest_level_label': self.unknown_lowest_level_label, 
                         'individual_transform': self.individual_transform, 
                         'pairwise_transform': self.pairwise_transform}, f )
+
+    def snip_clips(self):
+        snip_clips = []
+        for clip in self.training_data:
+            if int((clip['end_frame']-clip['start_frame'])/30) > self.snip_threshold:
+                a = clip['start_frame']
+                while a + (self.snip_threshold-1)*30 <= clip['end_frame']:
+                    b = a + (self.snip_threshold-1)*30
+                    # add the clip 
+                    snip_clip = clip.copy()
+                    snip_clip['start_frame'] = a
+                    snip_clip['end_frame'] = b
+                    snip_clips.append(snip_clip)
+                    # update the starting point
+                    a = b + 30
+            else:
+                snip_clips.append(clip)
+
+        self.training_data = snip_clips
+        del snip_clips
 
     def get_val_dataset(self):
         val_set = []
@@ -315,7 +342,7 @@ class EK_Dataset_pretrain_pairwise(Dataset):
                 if crop_type == 'blackout':
                     frames = crop_wrapper(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2, 
                                     scaling = 0.5, cache_dir='dataloader_cache/blackout_crop', mode=crop_type)
-                
+                else:
                     frames = crop_wrapper(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2, 
                                     scaling = 0.5, cache_dir='dataloader_cache/rescale_crop', mode=crop_type)
                 
@@ -357,7 +384,7 @@ class EK_Dataset_pretrain_pairwise(Dataset):
     def __len__(self):
         return len(self.rand_selection_indices)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx):        
         sample_a = self.training_data[self.rand_selection_indices[idx][0]]
         sample_b = self.training_data[self.rand_selection_indices[idx][1]]
 
