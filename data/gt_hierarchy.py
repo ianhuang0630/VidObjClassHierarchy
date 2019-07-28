@@ -3,7 +3,7 @@ import os
 import json
 import random
 
-DEBUG = True
+DEBUG = False
 if DEBUG:
     random.seed(7)
     np.random.seed(7)

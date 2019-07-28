@@ -297,6 +297,7 @@ class DatasetFactory(object):
                     raise ValueError("current frame is {} but frame_index is {}".format(row['frame'], frame_index))
             #all_frame_to_bounding_boxes[(participant_id, video_id)] = frame_to_bounding_boxes 
             previous_frame = None
+
             for idx, element in enumerate(tqdm(frames_and_classes)):
                 for class_ in states_dict:
                     # if new frame isn't 30 from the previous, 
