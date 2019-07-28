@@ -5,7 +5,9 @@ import os
 import torch
 import json
 from tqdm import tqdm
+from sklearn.manifold import TSNE
 import pickle
+import numpy as np
 
 try:
     from data.EK_dataloader import EK_Dataset_pretrain_pairwise
@@ -39,26 +41,42 @@ def viz_pretraining_pairwise_embeddings(model, dataset_path, visualize_section='
     net.eval()
 
     embeddings = []
+    unique_indices = list(set(np.array(indices).flatten().tolist()))
+    print('{} unique clips'.format(len(unique_indices)))
     # running model through the batches
-    for idx in tqdm(indices):
-        sample_a = all_data[idx[0]]
-        sample_b = all_data[idx[1]]
-        processed_pair = EK_Dataset_pretrain_pairwise.process(*([sample_a, sample_b] + processing_params))
+    for idx in tqdm(unique_indices):
+        sample = all_data[idx]
+        processed_pair = EK_Dataset_pretrain_pairwise.process(*([sample, sample] + processing_params))
         frames_a = torch.stack([processed_pair['frames_a']])
-        frames_b = torch.stack([processed_pair['frames_b']])
         label_a = processed_pair['noun_label_a']
-        label_b = processed_pair['noun_label_b']
 
         if USECUDA:
             frames_a = frames_a.type(torch.FloatTensor).to('cuda:0')
-            frames_b = frames_b.type(torch.FloatTensor).to('cuda:0')
             net = net.to('cuda:0')
         with torch.no_grad():
             encoding_a=net(frames_a)
-            encoding_b=net(frames_b)
         
-        embeddings.append([(encoding_a.data.cpu().numpy(), label_a), (encoding_b.data.cpu().numpy(), label_b)])
+        embeddings.append((encoding_a.data.cpu().numpy()[0], label_a))
     return embeddings
+
+def apply_TSNE(embeddings, output_dimensions=2):
+    """
+    Args:
+        embeddings: list of embeddings
+        output_dimensions: number of dimensions
+    Returns:
+        lower dimensional representation
+    """
+
+    # check if there are already output_dimensions 
+    assert output_dimensions in {2,3}, 'output_dimensions neeed to be either 2 or 3'
+    embedding_matrix = np.stack([element[0] for element in embeddings])
+
+    # pass into TSNE
+    embedded = TSNE(n_components=output_dimensions, verbose=10).fit_transform(embedding_matrix)
+    embeddings_out = [(vec, embeddings[idx][1]) for idx, vec in enumerate(list(embedded))]
+
+    return embeddings_out
 
 if __name__=='__main__':
 
