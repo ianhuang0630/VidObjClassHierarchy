@@ -44,25 +44,32 @@ def viz_pretraining_pairwise_embeddings(model, dataset_path, visualize_section='
     unique_indices = list(set(np.array(indices).flatten().tolist()))
     print('{} unique clips'.format(len(unique_indices)))
     # running model through the batches
-    for idx in tqdm(unique_indices):
-        sample = all_data[idx]
-        processed_pair = EK_Dataset_pretrain_pairwise.process(*([sample, sample] + processing_params))
+    for idx in tqdm(indices):
+        sample_a = all_data[idx[0]]
+        sample_b = all_data[idx[1]]
+        processed_pair = EK_Dataset_pretrain_pairwise.process(*([sample_a, sample_b] + processing_params))
         frames_a = torch.stack([processed_pair['frames_a']])
+        frames_b = torch.stack([processed_pair['frames_b']])
+
         label_a = processed_pair['noun_label_a']
+        label_b = processed_pair['noun_label_b']
 
         if USECUDA:
             frames_a = frames_a.type(torch.FloatTensor).to('cuda:0')
+            frames_b = frames_b.type(torch.FloatTensor).to('cuda:0')
             net = net.to('cuda:0')
         with torch.no_grad():
             encoding_a=net(frames_a)
-        
-        embeddings.append((encoding_a.data.cpu().numpy()[0], label_a))
+            encoding_b=net(frames_b)
+
+        embeddings.append([(encoding_a.data.cpu().numpy()[0], label_a),
+                            (encoding_b.data.cpu().numpy()[0], label_b)])
     return embeddings
 
 def apply_TSNE(embeddings, output_dimensions=2):
     """
     Args:
-        embeddings: list of embeddings
+        embeddings: list of pairs of embeddings
         output_dimensions: number of dimensions
     Returns:
         lower dimensional representation
@@ -70,19 +77,51 @@ def apply_TSNE(embeddings, output_dimensions=2):
 
     # check if there are already output_dimensions 
     assert output_dimensions in {2,3}, 'output_dimensions neeed to be either 2 or 3'
-    embedding_matrix = np.stack([element[0] for element in embeddings])
 
+    uniques = []
+    seen = {}
+    reference_indices = []
+    for pair in embeddings:
+        ref_indices = []
+        for i in range(2):
+            if tuple(pair[i][0].tolist()) not in seen:
+                # record index len(uniques)
+                ref_indices.append(len(uniques))
+                # add to unique and to seen
+                seen[tuple(pair[i][0].tolist())] = len(uniques)
+                uniques.append((tuple(pair[i][0].tolist()),pair[i][1]))
+ 
+            else:
+                # find where it was 
+                idx = seen[tuple(pair[i][0].tolist())]
+                ref_indices.append(idx)
+        reference_indices.append(ref_indices)
+
+    # stacked = []
+    # for element in embeddings:
+    #     stacked.append(tuple(element[0][0].tolist()))
+    #     stacked.append(tuple(element[1][0].tolist()))
+    # stacked = np.array(stacked)
     # pass into TSNE
-    embedded = TSNE(n_components=output_dimensions, verbose=10).fit_transform(embedding_matrix)
-    embeddings_out = [(vec, embeddings[idx][1]) for idx, vec in enumerate(list(embedded))]
 
-    return embeddings_out
+    uniques_vecs = np.array([element[0] for element in uniques])
+
+    embedded = TSNE(n_components=output_dimensions, verbose=10).fit_transform(uniques_vecs)
+    embedded = [(embedded[idx], vec[1]) for idx, vec in enumerate(uniques)]
+    # embeddings_out = []
+    # for i, pair in enumerate(embeddings):
+    #     idx_a = seen[tuple(pair[0][0].tolist())]
+    #     idx_b = seen[tuple(pair[1][0].tolist())]
+    #     embeddings_out.append([(embedded[idx_a], pair[0][1]), 
+    #                            (embedded[idx_b], pair[1][1])])
+
+    return embedded, reference_indices
 
 if __name__=='__main__':
 
-    training_embeddings = viz_pretraining_pairwise_embeddings('models/pretraining_tree/pairwise_run20/net_epoch0.pth', 
-                        'models/pretraining_tree/pairwise_run20/data_info.pkl', visualize_section='training')
-    val_embeddings  = viz_pretraining_pairwise_embeddings('models/pretraining_tree/pairwise_run20/net_epoch0.pth', 
-                        'models/pretraining_tree/pairwise_run20/data_info.pkl', visualize_section='validation')
+    training_embeddings = viz_pretraining_pairwise_embeddings('models/pretraining_tree/pairwise_run28/net_epoch0.pth', 
+                        'models/pretraining_tree/pairwise_run28/data_info.pkl', visualize_section='training')
+    val_embeddings  = viz_pretraining_pairwise_embeddings('models/pretraining_tree/pairwise_run28/net_epoch0.pth', 
+                        'models/pretraining_tree/pairwise_run28/data_info.pkl', visualize_section='validation')
     import ipdb; ipdb.set_trace()
-
+    print(apply_TSNE(training_embeddings))
