@@ -174,7 +174,8 @@ def save_training_config(path, args, knowns):
                     'embedding_dimension': args.embedding_dim,
                     'crop_mode': args.crop_mode,
                     'feature_extractor': args.feature_extractor,
-                    'optimizer_type': args.optimizer}
+                    'optimizer_type': args.optimizer,
+                    'sampler_mode': args.sampler_mode}
     with open(path, 'w') as f:
         json.dump(config_dict, f)
     
@@ -214,6 +215,8 @@ if __name__=='__main__':
                         help='image-level feature extraction')
     parser.add_argument('--optimizer', type=str, default='sgd',
                         help='type of optimizer to use')
+    parser.add_argument('--sampler_mode', type=str, default='equality',
+                        help='type of sampling technique.')
     args = parser.parse_args()
 
     # Setting up the paths
@@ -323,6 +326,7 @@ if __name__=='__main__':
                 pairwise_transform=composed_trans_pair,
                 training_num_samples=args.num_samples, 
                 crop_type=args.crop_mode,
+                sampling_mode=args.sampler_mode,
                 mode='resnet' if args.feature_extractor=='resnet' else 'noresnet'
                 ) 
         valset = DF.get_val_dataset()

@@ -16,9 +16,11 @@ from torch.utils import data
 try:
     from gt_hierarchy import *
     from EK_dataset import DatasetFactory
+    from sampler import Selector
 except: 
     from data.gt_hierarchy import *
     from data.EK_dataset import DatasetFactory
+    from data.sampler import Selector
 
 DEBUG = True
 
@@ -201,7 +203,8 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             pairwise_transform=None,
             mode='resnet', output_cache_folder='dataloader_cache/', 
             snip_threshold=32,
-            crop_type='blackout'):
+            crop_type='blackout',
+            sampling_mode='equality'):
         # purpose of the dataset object: either for pretraining or for training/testing
         super(EK_Dataset_pretrain_pairwise, self).__init__()
         self.image_data_folder = image_data_folder
@@ -246,10 +249,15 @@ class EK_Dataset_pretrain_pairwise(Dataset):
 
         # used to handle cases when the clip is especially long
         self.processed_frame_number = processed_frame_number
+        import ipdb; ipdb.set_trace()
 
-        self.rand_selection_indices = [np.random.choice(int(len(self.training_data)*0.8),2, replace=False).tolist() for i in range(self.train_num_samples)]
-        self.val_indices = [[element[0] + int(len(self.training_data)*0.8), element[1] + int(len(self.training_data)*0.8)] for element in \
-                    [list(np.random.choice(len(self.training_data) - int (len(self.training_data)*0.8), 2, replace=False)) for i in range(self.val_num_samples)]]
+        selector = Selector(self.training_data, option='equality', train_ratio=0.75)
+        self.rand_selection_indices = selector.get_indices('train')
+        self.val_indices = selector.get_indices('val')
+
+        # self.rand_selection_indices = [np.random.choice(int(len(self.training_data)*0.8),2, replace=False).tolist() for i in range(self.train_num_samples)]
+        # self.val_indices = [[element[0] + int(len(self.training_data)*0.8), element[1] + int(len(self.training_data)*0.8)] for element in \
+        #             [list(np.random.choice(len(self.training_data) - int (len(self.training_data)*0.8), 2, replace=False)) for i in range(self.val_num_samples)]]
         # # naive sampling of pairwise
         # self.rand_selection_indices = []
         # for i in range(self.train_num_samples + self.val_num_samples):
