@@ -204,7 +204,8 @@ class EK_Dataset_pretrain_pairwise(Dataset):
             mode='resnet', output_cache_folder='dataloader_cache/', 
             snip_threshold=32,
             crop_type='blackout',
-            sampling_mode='equality'):
+            sampling_mode='equality',
+            selector_train_ratio=0.75):
         # purpose of the dataset object: either for pretraining or for training/testing
         super(EK_Dataset_pretrain_pairwise, self).__init__()
         self.image_data_folder = image_data_folder
@@ -249,9 +250,8 @@ class EK_Dataset_pretrain_pairwise(Dataset):
 
         # used to handle cases when the clip is especially long
         self.processed_frame_number = processed_frame_number
-        import ipdb; ipdb.set_trace()
 
-        selector = Selector(self.training_data, option='equality', train_ratio=0.75)
+        selector = Selector(self.training_data, option='equality', train_ratio=selector_train_ratio)
         self.rand_selection_indices = selector.get_indices('train')
         self.val_indices = selector.get_indices('val')
 

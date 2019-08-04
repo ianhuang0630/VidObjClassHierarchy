@@ -104,8 +104,9 @@ class GetResnetFeats(object):
         # instantiate network
         self.model = models.resnet18(pretrained=True)
         self.model = nn.Sequential(*list(self.model.children())[:-2])
+
     def __call__(self, d):
-        assert 'frames' in d, 'need "frames" in d'
+        assert 'frames' in d, 'need "frames" in d' 
         new_d = d.copy()
         frames = new_d['frames'].transpose(0,1)
         with torch.no_grad():
