@@ -14,6 +14,8 @@ import torch.optim as optim
 from torchvision import transforms
 
 from src.tree_encoder import *
+from src.ltfb import *
+
 from data.EK_dataloader import EK_Dataset, EK_Dataset_pretrain, EK_Dataset_pretrain_pairwise 
 from data.gt_hierarchy import *
 from data.transforms import *
@@ -159,13 +161,13 @@ def pretrain(net, dataloader, optimizer_type='sgd', num_epochs=10, save_interval
 
     return net
 
-def save_training_config(path, args, knowns):
+def save_training_config(path, args, knowns, num_samples=None):
     config_dict = { 'run_num': args.run_num,
                     'max_training_knowns': args.max_training_knowns,
                     'known_classes': ','.join(knowns),
                     'model_mode': args.model_mode,
                     'num_epochs': args.epochs,
-                    'num_samples': args.num_samples,
+                    'num_samples': args.num_samples if num_samples is None else num_samples,
                     'batch_size': args.batch_size,
                     'lr': args.lr,
                     'rescale_imwidth': args.rescale_imwidth,
@@ -175,7 +177,8 @@ def save_training_config(path, args, knowns):
                     'crop_mode': args.crop_mode,
                     'feature_extractor': args.feature_extractor,
                     'optimizer_type': args.optimizer,
-                    'sampler_mode': args.sampler_mode}
+                    'sampler_mode': args.sampler_mode,
+                    'selector_train_ratio': args.selector_train_ratio}
     with open(path, 'w') as f:
         json.dump(config_dict, f)
     
@@ -217,6 +220,8 @@ if __name__=='__main__':
                         help='type of optimizer to use')
     parser.add_argument('--sampler_mode', type=str, default='equality',
                         help='type of sampling technique.')
+    parser.add_argument('--selector_train_ratio', type=float, default=0.75,
+                        help='Ratio of possible clips used for training')
     args = parser.parse_args()
 
     # Setting up the paths
@@ -282,8 +287,11 @@ if __name__=='__main__':
     
     if args.model_mode == 'simple':
         chosen_model_class = C3D_simplified
+    elif args.model_mode == 'ltfb':
+        chosen_model_class = LongTermFeatureBank
     else:
         chosen_model_class = C3D
+
 
     if MODE == 'individual':
         model_saveloc = os.path.join(args.model_folder, 'individual_run{}'.format(args.run_num))
@@ -315,7 +323,6 @@ if __name__=='__main__':
         if not os.path.exists(model_saveloc):
             os.makedirs(model_saveloc, exist_ok=True)
 
-        save_training_config(os.path.join(model_saveloc, 'config.json'), args, knowns)
 
         DF = EK_Dataset_pretrain_pairwise(knowns, unknowns,
                 train_object_csvpath, train_action_csvpath, 
@@ -327,11 +334,15 @@ if __name__=='__main__':
                 training_num_samples=args.num_samples, 
                 crop_type=args.crop_mode,
                 sampling_mode=args.sampler_mode,
-                mode='resnet' if args.feature_extractor=='resnet' else 'noresnet'
+                mode='resnet' if args.feature_extractor=='resnet' else 'noresnet',
+                selector_train_ratio=args.selector_train_ratio
                 ) 
+
         valset = DF.get_val_dataset()
         train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
         # saving object DF in the model folder
+
+        save_training_config(os.path.join(model_saveloc, 'config.json'), args, knowns, num_samples=len(DF))
 
         # now save DF.training_data, as well as DF.val_indices and DF.random_selection_indices
         with open(os.path.join(model_saveloc, 'data_info.pkl'), 'wb') as f:
