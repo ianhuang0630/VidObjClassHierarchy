@@ -13,7 +13,7 @@ class C3D_simplified(nn.Module):
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax()
 
-        self.conv1 = nn.Conv3d(input_shape[0], 32, kernel_size=(3, 3, 3), padding=(1, 1, 1), stride=(2,2,2))
+        self.conv1 = nn.Conv3d(input_shape[0], 32, kernel_size=(3, 1, 1), padding=(1, 1, 1), stride=(2, 1, 1))
         self.pool1 = nn.MaxPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2))
 
         self.conv2 = nn.Conv3d(32, 16, kernel_size=(3, 3, 3), padding=(1, 1, 1), stride=(2,2,2))
