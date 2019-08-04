@@ -66,7 +66,7 @@ def viz_pretraining_pairwise_embeddings(model, dataset_path, visualize_section='
                             (encoding_b.data.cpu().numpy()[0], label_b)])
     return embeddings
 
-def apply_TSNE(embeddings, output_dimensions=2):
+def apply_TSNE(embeddings, output_dimensions=2, perplexity=30.0):
     """
     Args:
         embeddings: list of pairs of embeddings
@@ -106,8 +106,14 @@ def apply_TSNE(embeddings, output_dimensions=2):
 
     uniques_vecs = np.array([element[0] for element in uniques])
 
-    embedded = TSNE(n_components=output_dimensions, verbose=10).fit_transform(uniques_vecs)
-    embedded = [(embedded[idx], vec[1]) for idx, vec in enumerate(uniques)]
+    if not all([element.size==output_dimensions for element in uniques_vecs]):
+        embedded = TSNE(n_components=output_dimensions, perplexity=perplexity, verbose=10).fit_transform(uniques_vecs)
+        embedded = [(embedded[idx], vec[1]) for idx, vec in enumerate(uniques)]
+    else:
+        print('Already in required dimensionality, just choosing these.')
+        embedded = uniques_vecs
+        embedded = [(embedded[idx], vec[1]) for idx, vec in enumerate(uniques)]
+
     # embeddings_out = []
     # for i, pair in enumerate(embeddings):
     #     idx_a = seen[tuple(pair[0][0].tolist())]
