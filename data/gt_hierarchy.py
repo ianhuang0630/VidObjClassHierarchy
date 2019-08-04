@@ -2,6 +2,8 @@ import numpy as np
 import os
 import json
 import random
+import pickle
+import pandas as pd
 
 DEBUG = False
 if DEBUG:
@@ -112,11 +114,24 @@ def get_tree_position(class_, known_classes, tree_file='hierarchyV1.json'):
 
     return encoding
 
+def get_noun_class_frame_frequency(object_file_path):
+
+    # loading the counts csv and making a dictionary
+    obj_df = pd.read_csv(object_file_path)
+    counts = {}
+    for class_id in list(set(obj_df.noun_class)): # a number
+        counts[class_id] = len(obj_df.loc[((obj_df['noun_class']==class_id) & (obj_df['bounding_boxes']!='[]'))])
+
+    return counts
+
 # TODO: add required_training_knowns file, which contains the classes which 
 # must be in the training known section
 def get_known_unknown_split(tree_file='hierarchyV1.json', 
                             required_training_knowns='EK_Imagenet_intersection.txt',
-                            max_training_knowns = 8):
+                            max_training_knowns = 8,
+                            label_csv_path = '/vision/group/EPIC-KITCHENS/annotations/EPIC_train_object_labels.csv',
+                            noun_key_path = '/vision/group/EPIC-KITCHENS/annotations/EPIC_noun_classes.csv',
+                            select_random_classes = True):
     """ gets the training/testing known/unknown split
     """
     # training knowns and unknowns
@@ -136,7 +151,26 @@ def get_known_unknown_split(tree_file='hierarchyV1.json',
         required_training_knowns = [element for element in lines.split('\n') if len(element)>0]
         if len(required_training_knowns) > max_training_knowns:
             # choose a subset of them
-            include_training_knowns = np.random.choice(required_training_knowns, max_training_knowns, replace=False).tolist() if not DEBUG else force_feed
+            # if random:
+            if select_random_classes:
+                include_training_knowns = np.random.choice(required_training_knowns, max_training_knowns, replace=False).tolist() if not DEBUG else force_feed
+
+            else:
+                counts = get_noun_class_frame_frequency(label_csv_path)
+                # TODO: maximize frequency of the max_training_knowns
+                class_key_df = pd.read_csv(noun_key_path)
+                class_key_dict = dict(zip(class_key_df.class_key, class_key_df.noun_id))
+
+                required_and_counts = []
+                for class_ in required_training_knowns:
+                    if class_key_dict[class_] not in counts:
+                        print('WARNING: {} NOT DETECTED'.format(class_))
+                        required_and_counts.append((class_, 0))
+                    else:
+                        required_and_counts.append((class_, counts[class_key_dict[class_]]))
+
+                include_training_knowns = [element[0] for element in sorted(required_and_counts, key=lambda x: x[1], reverse=True)][:max_training_knowns]
+
             found = {element: False for element in include_training_knowns}
     
     assert os.path.exists(tree_file), '{} does not exist'.format(tree_file)
@@ -199,3 +233,5 @@ if __name__=='__main__':
             format(get_tree_distance('onion', 'box')))
 
     print(get_tree_position('oil', ['oil']))
+
+    get_known_unknown_split()
