@@ -7,6 +7,7 @@ import torchvision.models as models
 import torch
 import cv2
 import numpy as np
+from PIL import Image
 
 class Transpose(object):
     """ TUrns H W 3 T  --> 3 T 1080 1920
@@ -41,6 +42,8 @@ class Rescale(object):
         frames_resized = np.stack(frames_resized, axis=3)
         new_d['frames'] = frames_resized
         # output; 1080, 1920, 3, 11
+        
+        # import ipdb; ipdb.set_trace()
         return new_d
 
 class TimeNormalize(object):
@@ -55,19 +58,35 @@ class TimeNormalize(object):
         frames = new_d['frames'].transpose([1, 0, 2, 3])
         new_d['frames']= frames[np.round(np.linspace(0,len(frames)-1, num=self.num_frames)).astype(np.int), :, :, :]
         new_d['frames'] = new_d['frames'].transpose([1, 0, 2, 3])
+        # import ipdb; ipdb.set_trace()
+
         return new_d
 
 class ToTensor(object):
     def __init__(self):
-        pass
+        self.tf = transforms.ToTensor()
 
     def __call__(self, d):
         new_d = d.copy()
         for key_ in new_d:
             if type(new_d[key_]) is np.ndarray: 
-                new_d[key_] = torch.from_numpy(new_d[key_])
+                # import ipdb; ipdb.set_trace()
+
+                if key_ == 'hierarchy_encoding':
+                    new_d[key_] = torch.from_numpy(new_d[key_])
+
+                else:
+                    pil_tf = []
+
+                    for timestep in range(new_d[key_].shape[1]):
+                        pil_tf.append(self.tf(Image.fromarray(new_d[key_][:,timestep,:,:].transpose([1,2,0]))))
+
+                    new_d[key_] = torch.Tensor(np.stack(pil_tf).transpose([1,0,2,3]))
+
             elif type(new_d[key_]) is int:
                 new_d[key_] = torch.Tensor([new_d[key_]])
+
+        # import ipdb; ipdb.set_trace()
         return new_d
 
 class NormalizeVideo(object):
@@ -76,6 +95,7 @@ class NormalizeVideo(object):
                                  std=[0.229, 0.224, 0.225])
 
     def __call__(self, d):
+        # import ipdb; ipdb.set_trace()
         assert 'frames' in d, 'need "frames" in d'
         new_d = d.copy() # 3, 11, H, W 
         frames = new_d['frames']
@@ -87,6 +107,7 @@ class NormalizeVideo(object):
         normalized_frames= torch.stack(normalized_frames, dim=3).transpose(2,3).transpose(1,2)
 
         new_d['frames'] = normalized_frames # 3, 11, H, W 
+        # import ipdb; ipdb.set_trace()
         return new_d
         
 class BGR2RGB(object):
@@ -104,6 +125,7 @@ class GetResnetFeats(object):
         # instantiate network
         self.model = models.resnet18(pretrained=True)
         self.model = nn.Sequential(*list(self.model.children())[:-2])
+        self.model.eval()
 
     def __call__(self, d):
         assert 'frames' in d, 'need "frames" in d' 
@@ -112,6 +134,25 @@ class GetResnetFeats(object):
         with torch.no_grad():
             new_d['frames']=self.model(frames)
         new_d['frames']=new_d['frames'].transpose(0,1)
+        return new_d
+
+class GetResnetLastLayerFeats(object):
+    def __init__(self):
+        # instantiate network
+        self.model = models.resnet18(pretrained=True)
+        self.model.eval() 
+        # self.model = nn.Sequential(*list(self.model.children())[:-2])
+
+    def __call__(self, d):
+        # import ipdb; ipdb.set_trace()
+
+        assert 'frames' in d, 'need "frames" in d' 
+        new_d = d.copy()
+        frames = new_d['frames'].transpose(0,1)
+        with torch.no_grad():
+            new_d['frames']=self.model(frames)
+        # new_d['frames']=new_d['frames'].transpose(0,1)
+        # import ipdb;ipdb .set_trace() 
         return new_d
 
 if __name__=='__main__':

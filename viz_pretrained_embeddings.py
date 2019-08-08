@@ -8,6 +8,9 @@ from tqdm import tqdm
 from sklearn.manifold import TSNE
 import pickle
 import numpy as np
+from torch.nn.modules.pooling import AvgPool3d
+
+from data.transforms import *
 
 try:
     from data.EK_dataloader import EK_Dataset_pretrain_pairwise
@@ -15,6 +18,122 @@ except:
     from EK_dataloader import EK_Dataset_pretrain_pairwise
 
 USECUDA = True 
+
+# JUST FOR EXPERIMENTATION!
+def viz_resnet_frames(dataset_path, visualize_section='training'):
+    model_dir =  os.path.dirname(dataset_path)
+    with open(os.path.join(model_dir, 'config.json'), 'r') as f:
+        config = json.load(f)
+        assert config['feature_extractor'] == 'resnet'
+
+    with open(os.path.join(model_dir, 'processing_params.pkl'), 'rb') as f:
+        processing_params = pickle.load(f)
+
+    with open(dataset_path, 'rb') as f:
+        dataset = pickle.load(f)
+
+    assert 'all_data' in dataset and 'train_indices' in dataset and 'val_indices' in dataset
+    assert visualize_section == 'training' or visualize_section == 'validation'
+
+    all_data = dataset['all_data']
+    indices = dataset['train_indices' if visualize_section=='training' else 'val_indices']
+
+    processing_params = [processing_params[element] for element in ["output_cache_fullpath", "crop_type", "processed_frame_number","f2bbox", 
+                                                                    "image_data_folder", "noun_dict", "knowns", "unknowns", "unknown_lowest_level_label", 
+                                                                    "individual_transform", "pairwise_transform"]]
+    # hijacking pairwise transforms
+    processing_params[-2] = transforms.Compose([Rescale((224, 224)),
+                                        Transpose(),
+                                        TimeNormalize(16),
+                                        BGR2RGB(),
+                                        ToTensor()
+                                        ])
+
+    unique_indices = list(set(np.array(indices).flatten().tolist()))
+    print('{} unique clips'.format(len(unique_indices)))
+
+    avgpool = None
+    frames = []
+    for idx in tqdm(unique_indices):
+        sample_a = all_data[idx]
+        processed_pair = EK_Dataset_pretrain_pairwise.process(*([sample_a, sample_a] + processing_params), overwrite=True)
+        frames_a = processed_pair['frames_a']
+
+        # processed_pair_frames = EK_Dataset_pretrain_pairwise.process(*([sample_a, sample_a] + processing_params2), overwrite=True)
+        # if avgpool is None:
+        #     avgpool = AvgPool3d(frames_a.shape[1:])
+        # result = avgpool(frames_a).squeeze().data.cpu().numpy()
+
+        frames.append(frames_a)
+
+    return frames 
+
+def viz_resnet_embeddings(dataset_path, visualize_section='training'):
+    model_dir =  os.path.dirname(dataset_path)
+    with open(os.path.join(model_dir, 'config.json'), 'r') as f:
+        config = json.load(f)
+        assert config['feature_extractor'] == 'resnet'
+
+    with open(os.path.join(model_dir, 'processing_params.pkl'), 'rb') as f:
+        processing_params = pickle.load(f)
+
+    with open(dataset_path, 'rb') as f:
+        dataset = pickle.load(f)
+
+    assert 'all_data' in dataset and 'train_indices' in dataset and 'val_indices' in dataset
+    assert visualize_section == 'training' or visualize_section == 'validation'
+
+    all_data = dataset['all_data']
+    indices = dataset['train_indices' if visualize_section=='training' else 'val_indices']
+
+    processing_params = [processing_params[element] for element in ["output_cache_fullpath", "crop_type", "processed_frame_number","f2bbox", 
+                                                                    "image_data_folder", "noun_dict", "knowns", "unknowns", "unknown_lowest_level_label", 
+                                                                    "individual_transform", "pairwise_transform"]]
+    # hijacking pairwise transforms
+    processing_params[-2] = transforms.Compose([Rescale((224, 224)),
+                                        Transpose(),
+                                        TimeNormalize(16),
+                                        BGR2RGB(),
+                                        ToTensor(),
+                                        NormalizeVideo(),
+                                        GetResnetLastLayerFeats(),
+                                        # ToTensor() 
+                                        ])
+
+    # processing_params2 = processing_params
+    # processing_params2[-2] = transforms.Compose([Rescale((224, 224)),
+    #                                     Transpose(),
+    #                                     TimeNormalize(16),
+    #                                     BGR2RGB(),
+    #                                     ToTensor(),
+    #                                     ])
+
+
+    unique_indices = list(set(np.array(indices).flatten().tolist()))
+    print('{} unique clips'.format(len(unique_indices)))
+
+    avgpool = None
+    embeddings = []
+    frames = []
+    for idx in tqdm(unique_indices):
+        sample_a = all_data[idx]
+        # import ipdb; ipdb.set_trace()
+        processed_pair = EK_Dataset_pretrain_pairwise.process(*([sample_a, sample_a] + processing_params), overwrite=True)
+        frames_a = processed_pair['frames_a']
+        label_a = processed_pair['noun_label_a']
+
+        # processed_pair_frames = EK_Dataset_pretrain_pairwise.process(*([sample_a, sample_a] + processing_params2), overwrite=True)
+        # if avgpool is None:
+        #     avgpool = AvgPool3d(frames_a.shape[1:])
+        # result = avgpool(frames_a).squeeze().data.cpu().numpy()
+
+        result = np.max(frames_a.data.cpu().numpy(), axis=0)
+        # result = frames_a.data.cpu().numpy()
+        embeddings.append([result, label_a ])
+
+        # frames.append(processed_pair_frames['frames_a'])
+
+    return embeddings#, frames 
 
 def viz_pretraining_pairwise_embeddings(model, dataset_path, visualize_section='training'):
     model_dir = os.path.dirname(dataset_path)
@@ -59,14 +178,30 @@ def viz_pretraining_pairwise_embeddings(model, dataset_path, visualize_section='
             frames_b = frames_b.type(torch.FloatTensor).to('cuda:0')
             net = net.to('cuda:0')
         with torch.no_grad():
-            encoding_a=net(frames_a)
-            encoding_b=net(frames_b)
+            encoding_a=net(torch.cat([frames_a, frames_a]))
+            encoding_b=net(torch.cat([frames_b, frames_b]))
 
         embeddings.append([(encoding_a.data.cpu().numpy()[0], label_a),
                             (encoding_b.data.cpu().numpy()[0], label_b)])
     return embeddings
 
 def apply_TSNE(embeddings, output_dimensions=2, perplexity=30.0):
+    assert output_dimensions in {2,3}, 'output_dimensions neeed to be either 2 or 3'
+
+    uniques = embeddings
+    uniques_vecs = np.array([element[0] for element in uniques])
+
+    if not all([element.size==output_dimensions for element in uniques_vecs]):
+        embedded = TSNE(n_components=output_dimensions, perplexity=perplexity, verbose=10).fit_transform(uniques_vecs)
+        embedded = [(embedded[idx], vec[1]) for idx, vec in enumerate(uniques)]
+    else:
+        print('Already in required dimensionality, just choosing these.')
+        embedded = uniques_vecs
+        embedded = [(embedded[idx], vec[1]) for idx, vec in enumerate(uniques)]
+    return embedded 
+          
+
+def apply_TSNE_pairs(embeddings, output_dimensions=2, perplexity=30.0):
     """
     Args:
         embeddings: list of pairs of embeddings
@@ -124,10 +259,14 @@ def apply_TSNE(embeddings, output_dimensions=2, perplexity=30.0):
     return embedded, reference_indices
 
 if __name__=='__main__':
+    #resnet_training_embeddings = viz_resnet_embeddings('models/pretraining_tree/pairwise_run0/data_info.pkl', visualize_section='training')
+    resnet_validation_input = viz_resnet_embeddings('models/pretraining_tree/pairwise_run0/data_info.pkl', visualize_section='validation')
 
-    training_embeddings = viz_pretraining_pairwise_embeddings('models/pretraining_tree/pairwise_run28/net_epoch0.pth', 
-                        'models/pretraining_tree/pairwise_run28/data_info.pkl', visualize_section='training')
-    val_embeddings  = viz_pretraining_pairwise_embeddings('models/pretraining_tree/pairwise_run28/net_epoch0.pth', 
-                        'models/pretraining_tree/pairwise_run28/data_info.pkl', visualize_section='validation')
+    import ipdb; ipdb.set_trace()
+
+    training_embeddings = viz_pretraining_pairwise_embeddings('models/pretraining_tree/pairwise_run0/net_epoch0.pth', 
+                        'models/pretraining_tree/pairwise_run0/data_info.pkl', visualize_section='training')
+    val_embeddings  = viz_pretraining_pairwise_embeddings('models/pretraining_tree/pairwise_run0/net_epoch0.pth', 
+                        'models/pretraining_tree/pairwise_run0/data_info.pkl', visualize_section='validation')
     import ipdb; ipdb.set_trace()
     print(apply_TSNE(training_embeddings))

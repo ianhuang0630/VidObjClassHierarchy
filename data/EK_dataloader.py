@@ -329,7 +329,7 @@ class EK_Dataset_pretrain_pairwise(Dataset):
     @staticmethod
     def process(sample_a, sample_b, output_cache_fullpath, crop_type, processed_frame_number,f2bbox, 
                 image_data_folder, noun_dict, knowns, unknowns, unknown_lowest_level_label, 
-                individual_transform, pairwise_transform):
+                individual_transform, pairwise_transform, overwrite=False):
         indiv_output_d = []
         for sample_dict in [sample_a, sample_b]:
             video_id = sample_dict['video_id']
@@ -339,7 +339,7 @@ class EK_Dataset_pretrain_pairwise(Dataset):
 
             # TODO: make cache name, search for cache file, if found load.
             cache_filename = 'v#{}p#{}s#{}e#{}.pkl'.format(video_id, participant_id, start_frame, end_frame)
-            if os.path.exists(os.path.join(output_cache_fullpath, cache_filename)):
+            if os.path.exists(os.path.join(output_cache_fullpath, cache_filename)) and not overwrite:
                 # loding d
                 with open(os.path.join(output_cache_fullpath, cache_filename), 'rb') as f:
                     d = pickle.load(f)
@@ -351,9 +351,11 @@ class EK_Dataset_pretrain_pairwise(Dataset):
                     frames = crop_wrapper(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2, 
                                     scaling = 0.5, cache_dir='dataloader_cache/blackout_crop', mode=crop_type)
                 else:
+
                     frames = crop_wrapper(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2, 
                                     scaling = 0.5, cache_dir='dataloader_cache/rescale_crop', mode=crop_type)
-                
+                    # import ipdb; ipdb.set_trace()
+
                 # get position in the tree
                 encoding = get_tree_position(noun_dict[sample_dict['noun_class']], knowns)
                 if encoding is None:
@@ -366,7 +368,11 @@ class EK_Dataset_pretrain_pairwise(Dataset):
                      'hierarchy_encoding': encoding}
 
                 if individual_transform is not None:
+                    # import ipdb; ipdb.set_trace()
+
                     d = individual_transform(d)
+                    # import ipdb; ipdb.set_trace() 
+
 
                 # saving into cache file
                 with open(os.path.join(output_cache_fullpath, cache_filename), 'wb') as f:

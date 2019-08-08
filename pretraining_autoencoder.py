@@ -46,7 +46,9 @@ def pretrain_pairwise(net, dataloader, valset, optimizer_type='sgd', num_epochs=
     val_losses_per10 = []
     for epoch in range(num_epochs):
         print('training on epoch {}'.format(epoch))
+
         for i, sample in enumerate(tqdm(dataloader)):
+
             # print('on batch {}'.format(i))
             frames_a = sample['frames_a']
             frames_b = sample['frames_b']
@@ -222,6 +224,8 @@ if __name__=='__main__':
                         help='type of sampling technique.')
     parser.add_argument('--selector_train_ratio', type=float, default=0.75,
                         help='Ratio of possible clips used for training')
+    # parser.add_argument('--ltfb_stack_num', type=int, default=2,
+    #                     help='number of layers in ltfb, if model_mode is ltfb')
     args = parser.parse_args()
 
     # Setting up the paths

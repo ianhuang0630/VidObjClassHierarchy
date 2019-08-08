@@ -25,7 +25,7 @@ class LongTermFeatureBank(nn.Module):
         self.softmax = nn.Softmax()
         self.relu = nn.ReLU()
         self.layernorm = LayerNorm(self.input_shape[:2])
-        self.dropout=nn.Dropout(p=0.5)
+        self.dropout=nn.Dropout(p=0.2)
     
         self.attention_layers = self.make_attention_block(self.num_stacks)
 
