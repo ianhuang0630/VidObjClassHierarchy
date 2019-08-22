@@ -72,7 +72,7 @@ class ToTensor(object):
             if type(new_d[key_]) is np.ndarray: 
                 # import ipdb; ipdb.set_trace()
 
-                if key_ == 'hierarchy_encoding':
+                if key_ == 'hierarchy_encoding' or key_=='dist_matrix':
                     new_d[key_] = torch.from_numpy(new_d[key_])
 
                 else:
