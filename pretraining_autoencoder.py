@@ -15,8 +15,9 @@ from torchvision import transforms
 
 from src.tree_encoder import *
 from src.ltfb import *
+from src.lifted_structure_loss import *
 
-from data.EK_dataloader import EK_Dataset, EK_Dataset_pretrain, EK_Dataset_pretrain_pairwise 
+from data.EK_dataloader import EK_Dataset, EK_Dataset_pretrain, EK_Dataset_pretrain_pairwise, EK_Dataset_pretrain_batchwise
 from data.gt_hierarchy import *
 from data.transforms import *
 
@@ -27,8 +28,98 @@ from tqdm import tqdm
 
 DEBUG = False 
 USECUDA = True 
-MODE = 'pairwise'
+MODE = 'batchwise'
 USERESNET = False # True
+
+def pretrain_batchwise(net, dataloader, valset, optimizer_type='sgd', num_epochs=10, save_interval=1, lr=0.01,
+        model_saveloc='models/pretraining_tree/pairwise'):
+
+    if not os.path.exists(model_saveloc):
+        os.makedirs(model_saveloc, exist_ok=True)
+    
+    criterion = HierarchicalLiftedStructureLoss(8, 'gpu' if USECUDA else 'cpu')
+    if optimizer_type=='sgd':
+        optimizer = torch.optim.SGD(net.parameters(), lr)
+    elif optimizer_type == 'adam':
+        optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+
+    loss_per_sample = []
+    val_losses_per10 = []
+    counter = 0
+
+    for epoch in range(num_epochs):
+        print('training on epoch {}'.format(epoch))
+
+        for i, sample in enumerate(tqdm(dataloader)):
+            # sample shape: [MINI_BATCH_SIZE, BATCH_SIZE, 512, TIMESTEPS, 7, 7]
+            # what this script is used to: [BATCH_SIZE, 512, TIMESTEPS, 7, 7]
+            mini_batch_size = len(sample['batch_frames'])
+            batch_size = sample['batch_frames'][0].shape[0]
+
+            batch_stacked = torch.cat(sample['batch_frames'])
+
+            # print('on batch {}'.format(i))
+            tree_distance = sample['dist_matrix']
+
+            if USECUDA:
+                batch_stacked = batch_stacked.type(torch.FloatTensor).to('cuda:0')
+                tree_distance = tree_distance.type(torch.FloatTensor).to('cuda:0')
+                net = net.to('cuda:0')
+
+            optimizer.zero_grad()
+            encodings = net(batch_stacked)
+            encodings = encodings.reshape((batch_size, mini_batch_size, -1))
+            
+            loss = criterion(encodings,tree_distance)
+
+            loss_per_sample.append(loss.data.cpu().numpy())
+            loss.backward()
+            optimizer.step()
+            # import ipdb; ipdb.set_trace()
+
+            
+            # if counter % 10 == 0: 
+            #     with open(os.path.join(model_saveloc, 'training_losses.pkl'.format(epoch)), 
+            #                 'wb') as f:
+            #         pickle.dump(loss_per_sample, f)
+                
+            #     # validate on valset 
+            #     val_losses = []
+            #     for val_sample in valset:
+            #         val_batch_stacked = torch.stack(val_sample['batch_frames'])
+            #         # val_batch_size = val_batch_stacked.shape[0]
+            #         # val_mini_batch_size = val_batch_stacked.shape[1]
+
+            #         # val_batch_stacked = val_batch_stacked.reshape([val_batch_size*val_mini_batch_size]+list(val_batch_stacked.shape[2:]))
+            #         val_tree_distance = val_sample['dist_matrix']
+            #         if USECUDA:
+            #             val_batch_stacked = val_batch_stacked.type(torch.FloatTensor).to('cuda:0')
+            #             val_tree_distance = val_tree_distance.type(torch.FloatTensor).to('cuda:0')
+            #             net = net.to('cuda:0')
+            #         with torch.no_grad():
+            #             val_encodings = net(val_batch_stacked)
+            #             # val_encodings = val_encodings.reshape((val_batch_size, val_mini_batch_size, -1))
+            #             val_encodings = val_encodings.unsqueeze(0)
+
+            #             val_loss = criterion(val_encodings, val_tree_distance)
+            #             val_losses.append(val_loss.data.cpu().numpy())
+            #     val_losses_per10.append(np.mean(val_losses))
+                
+            #     with open(os.path.join(model_saveloc, 'validation_losses.pkl'.format(epoch)), 
+            #                 'wb') as f:
+            #         pickle.dump(val_losses_per10, f)
+            #     # import ipdb; ipdb.set_trace()
+
+            counter += 1
+
+        if epoch % save_interval == 0:
+            print('current loss: {}'.format(str(loss)))
+            with open(os.path.join(model_saveloc, 'training_losses.pkl'.format(epoch)), 
+                'wb') as f:
+                pickle.dump(loss_per_sample, f)
+            torch.save(net, os.path.join(model_saveloc,
+                'net_epoch{}.pth'.format(epoch)))
+    return net
 
 def pretrain_pairwise(net, dataloader, valset, optimizer_type='sgd', num_epochs=10, save_interval=1, lr = 0.01, 
         model_saveloc='models/pretraining_tree/pairwise'):
@@ -358,5 +449,43 @@ if __name__=='__main__':
                     image_normalized_dimensions[1] if not args.feature_extractor=='resnet' else 7), 
                     embedding_dim=args.embedding_dim) # TODO: replace these
         pretrain_pairwise(model, train_dataloader, valset, optimizer_type=args.optimizer, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
+
+    elif MODE == 'batchwise':
+        model_saveloc = os.path.join(args.model_folder, 'batchwise_run{}'.format(args.run_num))
+        if not os.path.exists(model_saveloc):
+            os.makedirs(model_saveloc, exist_ok=True)
+
+        mini_batch_size = 20
+        DF = EK_Dataset_pretrain_batchwise(knowns, unknowns,
+                train_object_csvpath, train_action_csvpath, 
+                class_key_csvpath, image_data_folder,
+                model_saveloc,
+                batch_size=mini_batch_size,
+                processed_frame_number=time_normalized_dimension, 
+                individual_transform=resnet_trans_indiv if args.feature_extractor=='resnet' else composed_trans_indiv, 
+                batchwise_transform=composed_trans_pair,
+                training_num_samples=args.num_samples, 
+                crop_type=args.crop_mode,
+                sampling_mode=args.sampler_mode,
+                mode='resnet' if args.feature_extractor=='resnet' else 'noresnet',
+                selector_train_ratio=args.selector_train_ratio)
+
+        valset = DF.get_val_dataset()
+
+        train_dataloader = data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
+        save_training_config(os.path.join(model_saveloc, 'config.json'), args, knowns, num_samples=len(DF))
+
+        # now save DF.training_data, as well as DF.val_indices and DF.random_selection_indices
+        with open(os.path.join(model_saveloc, 'data_info.pkl'), 'wb') as f:
+            pickle.dump({'all_data': DF.training_data, 'train_indices': DF.rand_selection_indices, 'val_indices': DF.val_indices}, f)
+
+        model = chosen_model_class(input_shape=(in_channels, 
+                    time_normalized_dimension, 
+                    image_normalized_dimensions[0] if not args.feature_extractor=='resnet' else 7, 
+                    image_normalized_dimensions[1] if not args.feature_extractor=='resnet' else 7), 
+                    embedding_dim=args.embedding_dim) # TODO: replace these
+
+        pretrain_batchwise(model, train_dataloader, valset, optimizer_type=args.optimizer, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
+
     else:
         raise ValueError('invalid mode')

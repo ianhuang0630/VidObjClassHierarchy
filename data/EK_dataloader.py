@@ -22,7 +22,7 @@ except:
     from data.EK_dataset import DatasetFactory
     from data.sampler import Selector
 
-DEBUG = True
+DEBUG = False
 
 if DEBUG:
     random.seed(7)
@@ -186,6 +186,246 @@ def blackout_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder
         np.save(os.path.join(cache_dir, cache_filename), frames)
         create_config_file(threshold, processed_frame_number, cache_dir=cache_dir)
     return frames
+
+class EK_Dataset_pretrain_batchwise(Dataset):
+    def __init__(self, knowns, unknowns,
+            object_data_path,
+            action_data_path,
+            class_key_path,
+            image_data_folder,
+            model_saveloc,
+            batch_size = 8,
+            training_num_samples=10000,
+            validation_num_samples=200,
+            filter_function = default_filter_function,
+            processed_frame_number = 20, 
+            individual_transform=None,
+            batchwise_transform=None,
+            mode='resnet', output_cache_folder='dataloader_cache/', 
+            snip_threshold=32,
+            crop_type='rescale',
+            sampling_mode='equality',
+            selector_train_ratio=0.75):
+        super(EK_Dataset_pretrain_batchwise, self).__init__()
+        self.image_data_folder = image_data_folder 
+        self.knowns = knowns
+        self.unknowns = unknowns
+        self.individual_transform = individual_transform
+        self.batchwise_transform = batchwise_transform
+        self.train_num_samples = training_num_samples
+        self.val_num_samples = validation_num_samples
+
+        self.class_key_df = pd.read_csv(class_key_path)
+
+        self.mode = mode
+        assert self.mode == 'resnet' or self.mode == 'noresnet'
+        self.output_cache_folder = output_cache_folder
+        if not os.path.exists(self.output_cache_folder):
+            os.makedirs(self.output_cache_folder, exist_ok = True)
+        self.snip_threshold = snip_threshold
+        self.crop_type = crop_type
+        assert crop_type == 'blackout' or crop_type == 'rescale', 'crop_type must either be blackout or rescale'
+        # TODO: using the key, convert strings into unkowns
+        self.class_key_dict = dict(zip(self.class_key_df.class_key, self.class_key_df.noun_id))
+        self.noun_dict = dict(zip(self.class_key_df.noun_id, self.class_key_df.class_key))
+
+        self.output_cache_fullpath = os.path.join(os.path.join(self.output_cache_folder, self.mode + '_out'), self.crop_type)
+
+
+        self.DF = DatasetFactory(knowns, unknowns,
+                    object_data_path, action_data_path, class_key_path)
+        self.dataset = self.DF.get_dataset()
+
+        assert 'unknown_frame2bbox' in self.dataset \
+                and 'known_frame2bbox' in self.dataset, 'frame2bbox conversion not found'
+        self.training_data = self.dataset['known_pretrain']
+        self.unknown_lowest_level_label = survey_tree(self.knowns)
+
+        self.snip_clips()
+
+        buffer_ = []
+        for idx, sample in enumerate(self.training_data):
+            if filter_function(sample):
+                buffer_.append(sample)
+        self.training_data = buffer_
+        del buffer_
+
+        self.f2bbox = self.dataset['known_frame2bbox']
+        self.processed_frame_number = processed_frame_number
+
+        # calculating tree distance matrix
+        self.train_gt_dists = np.zeros((len(self.training_data), len(self.training_data)))
+        for idx1, nc1 in enumerate([self.noun_dict[element['noun_class']] for element in self.training_data]):
+            for idx2, nc2 in enumerate([self.noun_dict[element['noun_class']] for element in self.training_data]):
+                self.train_gt_dists [idx1, idx2] = get_tree_distance(nc1, nc2)
+
+        # intializing the first batch
+        self.batch_size = batch_size
+        self.num_batches = 5000
+        selector = Selector(self.training_data, option='fullyconnected', train_ratio=selector_train_ratio)
+        self.rand_selection_indices = selector.get_minibatch_indices('train', self.batch_size, self.num_batches)
+        self.val_indices = selector.get_minibatch_indices('val', self.batch_size, 40)
+    
+    @staticmethod
+    def process(data, output_cache_fullpath, crop_type, processed_frame_number,f2bbox, 
+                image_data_folder, noun_dict, knowns, unknowns, unknown_lowest_level_label, 
+                individual_transform, batchwise_transform, overwrite=False):
+        indiv_output_d = []
+        for sample_dict in data:
+            video_id = sample_dict['video_id']
+            participant_id = sample_dict['participant_id']
+            start_frame = sample_dict['start_frame']
+            end_frame = sample_dict['end_frame']
+
+            # TODO: make cache name, search for cache file, if found load.
+            cache_filename = 'v#{}p#{}s#{}e#{}.pkl'.format(video_id, participant_id, start_frame, end_frame)
+            if os.path.exists(os.path.join(output_cache_fullpath, cache_filename)) and not overwrite:
+                # loding d
+                with open(os.path.join(output_cache_fullpath, cache_filename), 'rb') as f:
+                    d = pickle.load(f)
+                indiv_output_d.append(d)
+
+            else:
+
+                if crop_type == 'blackout':
+                    frames = crop_wrapper(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2, 
+                                    scaling = 0.5, cache_dir='dataloader_cache/blackout_crop', mode=crop_type)
+                else:
+
+                    frames = crop_wrapper(sample_dict, processed_frame_number, f2bbox, image_data_folder, threshold=2, 
+                                    scaling = 0.5, cache_dir='dataloader_cache/rescale_crop', mode=crop_type)
+
+                # get position in the tree
+                encoding = get_tree_position(noun_dict[sample_dict['noun_class']], knowns)
+                if encoding is None:
+                    top_levels = tuple(get_tree_position(noun_dict[sample_dict['noun_class']], unknowns)[:-1])
+                    assert top_levels in unknown_lowest_level_label
+                    encoding = np.array(list(top_levels)+[unknown_lowest_level_label[top_levels][0]])
+
+                d = {'frames': frames,
+                     'noun_label': noun_dict[sample_dict['noun_class']],
+                     'hierarchy_encoding': encoding}
+
+                if individual_transform is not None:
+                    d = individual_transform(d)
+
+                # saving into cache file
+                with open(os.path.join(output_cache_fullpath, cache_filename), 'wb') as f:
+                    pickle.dump(d, f)
+
+                indiv_output_d.append(d)
+                
+        # get distance between all samples in this batch
+        gt_tree_dist = np.zeros((len(indiv_output_d), len(indiv_output_d)))
+        for idx1, nc1 in enumerate([element['noun_label'] for element in indiv_output_d]):
+            for idx2, nc2 in enumerate([element['noun_label'] for element in indiv_output_d]):
+                gt_tree_dist [idx1, idx2] = get_tree_distance(nc1, nc2)
+
+        output = {'batch_frames': [clip['frames'] for clip in indiv_output_d],
+                    'noun_labels': [clip['noun_label'] for clip in indiv_output_d],
+                    'dist_matrix': gt_tree_dist}
+
+        if batchwise_transform is not None:
+            output = batchwise_transform(output)
+        
+        return output
+
+    def get_val_dataset(self):
+        val_set = []
+        counter = 0
+
+        for batch in self.val_indices:
+            val_set.append(EK_Dataset_pretrain_batchwise.process(
+                                                [self.training_data[element] for element in batch],
+                                                self.output_cache_fullpath, self.crop_type, 
+                                                self.processed_frame_number, self.f2bbox, 
+                                                self.image_data_folder, self.noun_dict, self.knowns, 
+                                                self.unknowns, self.unknown_lowest_level_label, 
+                                                self.individual_transform, self.batchwise_transform))
+            # val_set.append(sample_batch)
+
+        return val_set
+
+    def snip_clips(self): 
+        snip_clips = []
+        for clip in self.training_data:
+            if int((clip['end_frame']-clip['start_frame'])/30) > self.snip_threshold:
+                a = clip['start_frame']
+                while a + (self.snip_threshold-1)*30 <= clip['end_frame']:
+                    b = a + (self.snip_threshold-1)*30
+                    # add the clip 
+                    snip_clip = clip.copy()
+                    snip_clip['start_frame'] = a
+                    snip_clip['end_frame'] = b
+                    snip_clips.append(snip_clip)
+                    # update the starting point
+                    a = b + 30
+            else:
+                snip_clips.append(clip)
+
+        self.training_data = snip_clips
+        del snip_clips
+
+        
+
+    def __len__(self):
+        return len(self.rand_selection_indices)
+
+    # def initialize_batch(self, batch_size, negative_levels = [2,4]):
+    #     assert batch_size%2 == 0, 'expected even number for batch_size'
+    #     row, col = np.where(self.train_gt_dists == 0) # same group
+    #     # pick 2 that are 0 distance from eachother
+    #     p1 = np.random.choice(row)
+    #     p2 = np.random.choice(np.where(self.train_gt_dists[p1,:]==0)[0])
+
+    #     # for p1 and p2, pick ones that are 2 away, 4 away and 6 away, if available.
+        
+    #     samples_per_level = [int(np.round(((batch_size - 2)/2)/len(negative_levels))) for i in range(len(negative_levels))]
+    #     if sum(samples_per_level) != int((batch_size-2)/2):
+    #         samples_per_level[-1] -= sum(samples_per_level) - int((batch_size-2)/2)
+    #     assert sum(samples_per_level) == int((batch_size -2)/2)
+
+    #     get_indices = [p1, p2]
+    #     import ipdb; ipdb.set_trace()
+
+    #     for p in [p1, p2]:
+    #         for idx, dist in enumerate(negative_levels):
+    #             match_indices = np.where(self.train_gt_dists[p,:] == dist)[0]
+    #             if len(match_indices) < samples_per_level[idx]:
+    #                 # then let choice be replace = True
+    #                 neg_indices = np.random.choice(match_indices, samples_per_level[idx], replace=True)
+    #             else:
+    #                 neg_indices = np.random.choice(match_indices, samples_per_level[idx], replace=False)
+
+    #             get_indices.extend(neg_indices.tolist())
+
+    #     assert len(get_indices) == batch_size
+
+    #     return [self.training_data[i] for i in get_indices]
+
+    def upate_next_batch(self, distance_matrix):
+        # distance_matrix is mxm, where the index along both rows *and* columns are
+        # the corresponding video in self.training_data
+
+
+        # find random GT dist 0 pairs, 
+
+        # Then, for each, find closest GT dist 2 pairs, then 4
+
+        
+
+
+        pass 
+
+    def __getitem__(self, idx):
+
+        batch = [self.training_data[element] for element in self.rand_selection_indices[idx]]
+
+        return EK_Dataset_pretrain_batchwise.process(batch, self.output_cache_fullpath, self.crop_type, self.processed_frame_number, self.f2bbox, 
+                self.image_data_folder, self.noun_dict, self.knowns, self.unknowns, self.unknown_lowest_level_label, 
+                self.individual_transform, self.batchwise_transform)
+
+         
 
 
 class EK_Dataset_pretrain_pairwise(Dataset):
@@ -406,7 +646,7 @@ class EK_Dataset_pretrain_pairwise(Dataset):
                 self.image_data_folder, self.noun_dict, self.knowns, self.unknowns, self.unknown_lowest_level_label, 
                 self.individual_transform, self.pairwise_transform)
         
-
+# NOTE: DEPRECATED
 class EK_Dataset_pretrain(Dataset):
     def __init__(self, knowns, unknowns,
             object_data_path,
@@ -614,14 +854,17 @@ if __name__=='__main__':
     # DF = EK_Dataset(knowns, unknowns,
     #         train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
     # print(DF[2])
-    
-    with open('current_split.pkl','rb') as f:
-        split = pickle.load(f)
+    split = get_known_unknown_split()
+    # with open('current_split.pkl','rb') as f:
+    #     split = pickle.load(f)
     knowns = split['training_known']
     unknowns = split['training_unknown']
     
-    DF_pretrain = EK_Dataset_pretrain_pairwise(knowns, unknowns,
-            train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
+    # DF_pretrain = EK_Dataset_pretrain_pairwise(knowns, unknowns,
+    #         train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
+
+    DF_pretrain = EK_Dataset_pretrain_batchwise(knowns, unknowns,
+             train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder, 'rm_me')
     import ipdb; ipdb.set_trace()
     print(DF_pretrain[14])
     # for i in range(4):

@@ -6,6 +6,18 @@ DEBUG = True
 if DEBUG:
     np.random.seed(7)
 
+class BatchwiseSelector(object):
+
+    def __init__(self, data, train_ratio=0.8, option='equality'):
+        self.data = data
+        self.option = option
+
+        
+        pass
+
+    def get_indices(self, set_type):
+        pass
+
 class Selector(object):
     def __init__(self, data, train_ratio=0.8, option='equality'):
         """
@@ -64,7 +76,7 @@ class Selector(object):
                     pairs.append((indices[i], indices2[j]))
         return pairs
 
-    def get_fully_connected_indices(self, data, sample_num=None):
+    def get_fully_connected_pair_indices(self, data, sample_num=None):
         """
         Args:
             data: dictionary of clips per different class
@@ -89,7 +101,7 @@ class Selector(object):
 
         return pairs
 
-    def get_equitable_indices(self, data, min_threshold=20, max_threshold=500, bruteforcelist=True):
+    def get_equitable_pair_indices(self, data, min_threshold=20, max_threshold=500, bruteforcelist=True):
         
         # calculating the max and min number of pairs possible within classes and accross classes
         counts = {}
@@ -132,20 +144,57 @@ class Selector(object):
                         for i in range(num_choices):
                             # selecting two from the current list at random
                             choice1 = np.random.choice(data[class1], 1, replace=False)[0]
-                            choice2 = np.random.choice(data[class1], 1, replace=False)[0]
+                            choice2 = np.random.choice(data[class2], 1, replace=False)[0]
                             pairs.append((choice1, choice2))
         return pairs
+
+    def get_vanilla_minibatch_indices(self, data, batch_size, num_batches):
+        # select batch_size independent samples fromsdata
+        cop = []
+        for values in list(data.values()):
+            cop.extend(values)
+        assert batch_size <= len(cop)
+        batches = []
+
+        for i in range(num_batches):
+            batch = np.random.choice(cop, batch_size, replace=False)
+            batches.append(batch)
+
+        return batches 
+
+    def get_equitable_minibatch_indices(self, data, batch_size, num_batches):
+        # picking randomly from equal representations
+        # when adding to batch, least represented class gets a boost in likelihood of being selected
+        
+        pass
+
+    def get_minibatch_indices(self, set_type, batch_size, num_batches):
+        assert set_type == 'train' or set_type == 'val', 'set_type has to be either train or val.'
+
+        if self.option == 'fullyconnected':
+            batches = self.get_vanilla_minibatch_indices(self.train_split if set_type == 'train' else self.val_split,
+                                                batch_size=batch_size, num_batches=num_batches)
+            pass
+        elif self.option == 'equality':
+            batches = self.get_equitable_minibatch_indices(self.train_split if set_type == 'train' else self.val_split,
+                                                batch_size=batch_size, num_batches=num_batches)
+
+            pass
+        else:
+            raise ValueError('self.option is not valid. Double check.')
+
+        return batches 
 
     def get_indices(self, set_type, min_threshold=40, max_threshold=500, sample_num=0.8):
 
         assert set_type == 'train' or set_type == 'val', 'set_type has to be either train or val.'
 
         if self.option == 'fullyconnected':
-            pairs = self.get_fully_connected_indices(self.train_split if set_type =='train' else self.val_split,
+            pairs = self.get_fully_connected_pair_indices(self.train_split if set_type =='train' else self.val_split,
                                                             sample_num=sample_num)
 
         elif self.option == 'equality':
-            pairs = self.get_equitable_indices(self.train_split if set_type == 'train' else self.val_split,
+            pairs = self.get_equitable_pair_indices(self.train_split if set_type == 'train' else self.val_split,
                                                         min_threshold=min_threshold, max_threshold=max_threshold)
         else:
             raise ValueError('self.option is not valid. Double check.')
@@ -156,10 +205,11 @@ if __name__ == '__main__':
     import pickle
     with open('rm_me.pkl', 'rb') as f:
         training_data = pickle.load(f)
+    import ipdb; ipdb.set_trace()
     my_selector = Selector(training_data, option='equality', train_ratio=0.6)
 
-    train_pair_indices = my_selector.get_indices('train')
-    val_pair_indices = my_selector.get_indices('val')
+    train_pair_indices = my_selector.get_minibatch_indices('train', 32)
+    val_pair_indices = my_selector.get_minibatch_indices('val', 32)
     import ipdb; ipdb.set_trace()
 
 
