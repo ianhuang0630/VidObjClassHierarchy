@@ -63,6 +63,7 @@ class LongTermFeatureBank(nn.Module):
             layers.append(nn.ReLU())
             input_shapes.append(output_dim)
 
+        layers = layers[:-1] # cutting out the last relu
         return layers
 
     def attention_forward(self, x, L, layer_num):
