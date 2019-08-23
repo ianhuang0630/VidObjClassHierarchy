@@ -48,12 +48,17 @@ class HierarchicalLiftedStructureLoss(nn.Module):
         """
 
         loss = 0#Variable(torch.Tensor([0]).squeeze(), requires_grad=True)
+        c = 0
 
         for batch_num in range(inputs_batch.shape[0]):
             inputs = inputs_batch[batch_num]
             targets = targets_batch[batch_num]
 
             n = inputs.size(0)
+            # indices for later use
+            indices = torch.arange(n)
+            if self.device=='gpu':
+                indices = indices.to('cuda:0')
 
             # calculating similarity *according to the paper*
             x_tilde = torch.norm(inputs, dim=1).unsqueeze(0).t().pow(2)
@@ -65,82 +70,93 @@ class HierarchicalLiftedStructureLoss(nn.Module):
 
             dist_sqrd = torch.matmul(x_tilde, one_vec.t()) + torch.matmul(one_vec, x_tilde.t()) - 2 * similarity
 
-            if self.hard_mining is not None:
-                J_ijs = torch.Tensor([])
+            J_ijs = torch.Tensor([])
+            if self.device=='gpu':
+                J_ijs = J_ijs.to('cuda:0')
+
+            for i in range(n):
+                
+                pos_pair_ = torch.masked_select(dist_sqrd[i], targets[i] == 0)
+
+                pos_pair_indices = torch.masked_select(indices, targets[i] == 0) # list of indices in dist_sqrd that are positive samples
+                # taking out the instance corresponding to i itself
+                pos_pair_ = torch.masked_select(pos_pair_, pos_pair_indices!=i)
+                pos_pair_indices = torch.masked_select(pos_pair_indices, pos_pair_indices!=i)
+                # at this point, the indicies in pos_pair_indices correspond to pos_pair
+                assert len(pos_pair_) == len(pos_pair_indices)
+
+                pos_pair_, pos_pair_idx_ = torch.sort(pos_pair_)
+
+                if len(pos_pair_) == 0: # skip if cannot find positive pair, determined by target matrix 
+                    continue
+
+                # choose random pos_pair
+                if self.hard_mining == 'random_positive':
+                    pos_idx = np.random.choice(len(pos_pair_idx_))
+                    pos_pair_idx = pos_pair_idx_[pos_idx]
+                elif self.hard_mining == 'hard_positive':
+                    pos_idx = -1
+                    pos_pair_idx = pos_pair_idx_[pos_idx]
+
+                pos_pair = pos_pair_[pos_idx]
+    
+                logs = torch.Tensor([])
                 if self.device=='gpu':
-                    J_ijs = J_ijs.to('cuda:0')
+                    logs = logs.to('cuda:0')
 
-                for i in range(n):
-                    
-                    pos_pair_ = torch.masked_select(dist_sqrd[i], targets[i] == 0)
-                    pos_pair_ = torch.masked_select(pos_pair_, pos_pair_>0)
-                    pos_pair_, pos_pair_idx_ = torch.sort(pos_pair_)
+                # find the positive pair for the ith example
+                for idx, p in enumerate(self.penalties[1:]):
+                    # from left
+                    neg_pair_left = torch.masked_select(dist_sqrd[i], targets[i] == p)
 
-                    if len(pos_pair_) == 0: # skip if cannot find positive pair
+                    if len(neg_pair_left) == 0: # determined by target matrix
                         continue
+                    elif len(neg_pair_left) >= self.num_instances_left[idx]:
+                        neg_pairs_left = torch.sort(neg_pair_left)[0][:self.num_instances_left[idx]]
+                    else: # not greater than self.num_instances_left
+                        neg_pairs_left = neg_pair_left
 
-                    # choose random pos_pair
+                    neg_pair_right = torch.masked_select(dist_sqrd[pos_pair_indices[pos_pair_idx]], targets[pos_pair_indices[pos_pair_idx]] == p)
+                    if len(neg_pair_right) == 0:
+                        continue
+                    elif len(neg_pair_right) >= self.num_instances_right[idx]:
+                        neg_pairs_right = torch.sort(neg_pair_right)[0][:self.num_instances_right[idx]]
+                    else: # not greater than self.num_instances_right
+                        neg_pairs_right = neg_pair_right
 
-                    if self.hard_mining == 'random_positive':
-                        pos_idx = np.random.choice(len(pos_pair_idx_))
-                        pos_pair_idx = pos_pair_idx_[pos_idx]
-                    elif self.hard_mining == 'hard_positive':
-                        pos_idx = -1
-                        pos_pair_idx = pos_pair_idx_[pos_idx]
+                    new_log = torch.log(torch.sum(
+                        torch.cat(
+                            (torch.exp(torch.abs(p-neg_pairs_left)),
+                            torch.exp(torch.abs(p-neg_pairs_right)))
+                        ), 0, keepdim=True
+                        ))
+                    logs = torch.cat((logs, new_log))
 
-                    pos_pair = pos_pair_[pos_idx]
-        
-                    logs = torch.Tensor([])
-                    if self.device=='gpu':
-                        logs = logs.to('cuda:0')
+                    # # calculate the loss
+                    # logs = torch.cat((logs,
+                    #     torch.logsumexp(torch.abs(p-neg_pairs_left), dim=0, keepdim=True)))
+                    #     #torch.log(torch.sum(torch.exp(torch.abs(p-neg_pairs_left))))), 0
 
-                    # find the positive pair for the ith example
-                    for idx, p in enumerate(self.penalties[1:]):
-                        # from left
-                        neg_pair_left = torch.masked_select(dist_sqrd[i], targets[i] == p)
+                    # logs = torch.cat((logs,
+                    #     torch.logsumexp(torch.abs(p-neg_pairs_right), dim=0, keepdim=True)))
+                    #     # torch.log(torch.sum(torch.exp(torch.abs(p-neg_pairs_right))))), 0
 
-                        if len(neg_pair_left) == 0:
-                            continue
-                        elif len(neg_pair_left) >= self.num_instances_left[idx]:
-                            neg_pairs_left = torch.sort(neg_pair_left)[0][:self.num_instances_left[idx]]
-                        else: # not greater than self.num_instances_left
-                            neg_pairs_left = neg_pair_left
+                J_ij = torch.sum(logs, 0, keepdim=True) + pos_pair
+                J_ijs = torch.cat((J_ijs , self.max(J_ij).pow(2)), 0)
+                if torch.sum(J_ijs) == 0:
+                    import ipdb; ipdb.set_trace()
 
-                        neg_pair_right = torch.masked_select(dist_sqrd[pos_pair_idx], targets[pos_pair_idx] == p)
-                        if len(neg_pair_right) == 0:
-                            continue
-                        elif len(neg_pair_right) >= self.num_instances_right[idx]:
-                            neg_pairs_right = torch.sort(neg_pair_right)[0][:self.num_instances_right[idx]]
-                        else: # not greater than self.num_instances_right
-                            neg_pairs_right = neg_pair_right
-                        
+            if len(J_ijs) == 0:
+                loss += torch.sum(J_ijs)
+                c += 1
+            else:
+                loss += 1/len(J_ijs) * torch.sum(J_ijs)
+                c += 1
 
-
-                        # calculate the loss
-                        logs = torch.cat((logs,
-                            torch.logsumexp(torch.abs(p-neg_pairs_left), dim=0, keepdim=True)))
-                            #torch.log(torch.sum(torch.exp(torch.abs(p-neg_pairs_left))))), 0
-
-                        logs = torch.cat((logs,
-                            torch.logsumexp(torch.abs(p-neg_pairs_right), dim=0, keepdim=True)))
-                            # torch.log(torch.sum(torch.exp(torch.abs(p-neg_pairs_right))))), 0
-
-                    J_ij = torch.sum(logs, 0, keepdim=True) + pos_pair
-                    J_ijs = torch.cat((J_ijs , self.max(J_ij).pow(2)), 0)
-                    if torch.sum(J_ijs) == 0:
-                        import ipdb; ipdb.set_trace()
-                if len(J_ijs) == 0:
-                    loss += torch.sum(J_ijs)
-                else:
-                    loss += 1/len(J_ijs) * torch.sum(J_ijs)
-
-        else:
-            pass
-
-        if loss.grad_fn is None:
+        if loss == 0:
             import ipdb; ipdb.set_trace()
-            
-        return loss/inputs_batch.shape[0]
+
+        return loss/c
 
 
 
