@@ -37,7 +37,7 @@ def pretrain_batchwise(net, dataloader, valset, optimizer_type='sgd', num_epochs
     if not os.path.exists(model_saveloc):
         os.makedirs(model_saveloc, exist_ok=True)
     
-    criterion = HierarchicalLiftedStructureLoss(8, 'gpu' if USECUDA else 'cpu')
+    criterion = HierarchicalLiftedStructureLoss(8, 'gpu' if USECUDA else 'cpu', hard_mining='random_positive')
     if optimizer_type=='sgd':
         optimizer = torch.optim.SGD(net.parameters(), lr)
     elif optimizer_type == 'adam':
@@ -77,38 +77,38 @@ def pretrain_batchwise(net, dataloader, valset, optimizer_type='sgd', num_epochs
             optimizer.step()
             # import ipdb; ipdb.set_trace()
 
-            
-            # if counter % 10 == 0: 
-            #     with open(os.path.join(model_saveloc, 'training_losses.pkl'.format(epoch)), 
-            #                 'wb') as f:
-            #         pickle.dump(loss_per_sample, f)
+            if counter % 10 == 0: 
+                with open(os.path.join(model_saveloc, 'training_losses.pkl'.format(epoch)), 
+                            'wb') as f:
+                    pickle.dump(loss_per_sample, f)
                 
-            #     # validate on valset 
-            #     val_losses = []
-            #     for val_sample in valset:
-            #         val_batch_stacked = torch.stack(val_sample['batch_frames'])
-            #         # val_batch_size = val_batch_stacked.shape[0]
-            #         # val_mini_batch_size = val_batch_stacked.shape[1]
+                # validate on valset 
+                val_losses = []
+                for val_sample in valset:
+                    val_batch_stacked = torch.stack(val_sample['batch_frames'])
+                    # val_batch_size = val_batch_stacked.shape[0]
+                    # val_mini_batch_size = val_batch_stacked.shape[1]
 
-            #         # val_batch_stacked = val_batch_stacked.reshape([val_batch_size*val_mini_batch_size]+list(val_batch_stacked.shape[2:]))
-            #         val_tree_distance = val_sample['dist_matrix']
-            #         if USECUDA:
-            #             val_batch_stacked = val_batch_stacked.type(torch.FloatTensor).to('cuda:0')
-            #             val_tree_distance = val_tree_distance.type(torch.FloatTensor).to('cuda:0')
-            #             net = net.to('cuda:0')
-            #         with torch.no_grad():
-            #             val_encodings = net(val_batch_stacked)
-            #             # val_encodings = val_encodings.reshape((val_batch_size, val_mini_batch_size, -1))
-            #             val_encodings = val_encodings.unsqueeze(0)
+                    # val_batch_stacked = val_batch_stacked.reshape([val_batch_size*val_mini_batch_size]+list(val_batch_stacked.shape[2:]))
+                    val_tree_distance = val_sample['dist_matrix']
+                    if USECUDA:
+                        val_batch_stacked = val_batch_stacked.type(torch.FloatTensor).to('cuda:0')
+                        val_tree_distance = val_tree_distance.type(torch.FloatTensor).to('cuda:0')
+                        net = net.to('cuda:0')
+                    with torch.no_grad():
+                        val_encodings = net(val_batch_stacked)
+                        # val_encodings = val_encodings.reshape((val_batch_size, val_mini_batch_size, -1))
+                        val_encodings = val_encodings.unsqueeze(0)
+                        val_tree_distance = val_tree_distance.unsqueeze(0)
 
-            #             val_loss = criterion(val_encodings, val_tree_distance)
-            #             val_losses.append(val_loss.data.cpu().numpy())
-            #     val_losses_per10.append(np.mean(val_losses))
+                        val_loss = criterion(val_encodings, val_tree_distance)
+                        val_losses.append(val_loss.data.cpu().numpy())
+                val_losses_per10.append(np.mean(val_losses))
                 
-            #     with open(os.path.join(model_saveloc, 'validation_losses.pkl'.format(epoch)), 
-            #                 'wb') as f:
-            #         pickle.dump(val_losses_per10, f)
-            #     # import ipdb; ipdb.set_trace()
+                with open(os.path.join(model_saveloc, 'validation_losses.pkl'.format(epoch)), 
+                            'wb') as f:
+                    pickle.dump(val_losses_per10, f)
+                # import ipdb; ipdb.set_trace()
 
             counter += 1
 
