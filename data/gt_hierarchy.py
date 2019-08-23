@@ -5,11 +5,10 @@ import random
 import pickle
 import pandas as pd
 
-DEBUG = False
+DEBUG = True
 if DEBUG:
     random.seed(7)
     np.random.seed(7)
-    force_feed = ['chicken', 'carrot']
 
 def tree_dist(loc1, loc2):
     lock = False
@@ -139,9 +138,9 @@ def get_known_unknown_split(tree_file='hierarchyV1.json',
     training_unknowns = []
     testing_unknowns = []
     training_knowns = [] 
-    if DEBUG:
-        print('WARNING WE ARE FORCE FEEDING')
-        max_training_knowns=len(force_feed)
+    # if DEBUG:
+    #     print('WARNING WE ARE FORCE FEEDING')
+    #     max_training_knowns=len(force_feed)
 
     if required_training_knowns is not None:
         # loading the required training known classes
@@ -153,7 +152,7 @@ def get_known_unknown_split(tree_file='hierarchyV1.json',
             # choose a subset of them
             # if random:
             if select_random_classes:
-                include_training_knowns = np.random.choice(required_training_knowns, max_training_knowns, replace=False).tolist() if not DEBUG else force_feed
+                include_training_knowns = np.random.choice(required_training_knowns, max_training_knowns, replace=False).tolist()
 
             else:
                 counts = get_noun_class_frame_frequency(label_csv_path)
