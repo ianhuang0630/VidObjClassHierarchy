@@ -261,7 +261,7 @@ class EK_Dataset_pretrain_batchwise(Dataset):
 
         # intializing the first batch
         self.batch_size = batch_size
-        self.num_batches = 5000
+        self.num_batches = int(training_num_samples/batch_size)
         selector = Selector(self.training_data, option='fullyconnected', train_ratio=selector_train_ratio)
         self.rand_selection_indices = selector.get_minibatch_indices('train', self.batch_size, self.num_batches)
         self.val_indices = selector.get_minibatch_indices('val', self.batch_size, 40)

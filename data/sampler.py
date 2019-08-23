@@ -2,21 +2,9 @@
 Sampling script for finding the optimal pairs
 """
 import numpy as np
-DEBUG = True
+DEBUG = False
 if DEBUG:
     np.random.seed(7)
-
-class BatchwiseSelector(object):
-
-    def __init__(self, data, train_ratio=0.8, option='equality'):
-        self.data = data
-        self.option = option
-
-        
-        pass
-
-    def get_indices(self, set_type):
-        pass
 
 class Selector(object):
     def __init__(self, data, train_ratio=0.8, option='equality'):
