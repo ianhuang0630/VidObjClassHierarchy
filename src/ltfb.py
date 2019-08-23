@@ -16,7 +16,7 @@ from torchvision.ops import roi_align
 class LongTermFeatureBank(nn.Module):
     def __init__(self, input_shape, embedding_dim, 
                     classifier_output_layers = [200, 50, 10],
-                    num_stacks=2, precomputed=True):
+                    num_stacks=1, precomputed=True):
         super(LongTermFeatureBank, self).__init__()
 
         self.input_shape = tuple(np.array(input_shape)[[1,0,2,3]]) # time, num_channels, height, width
