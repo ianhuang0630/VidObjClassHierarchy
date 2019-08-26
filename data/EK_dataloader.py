@@ -195,7 +195,7 @@ class EK_Dataset_pretrain_batchwise(Dataset):
             image_data_folder,
             model_saveloc,
             batch_size = 8,
-            training_num_samples=10000,
+            training_num_batches=1000,
             validation_num_samples=200,
             filter_function = default_filter_function,
             processed_frame_number = 20, 
@@ -212,7 +212,7 @@ class EK_Dataset_pretrain_batchwise(Dataset):
         self.unknowns = unknowns
         self.individual_transform = individual_transform
         self.batchwise_transform = batchwise_transform
-        self.train_num_samples = training_num_samples
+        self.train_num_batches = training_num_batches
         self.val_num_samples = validation_num_samples
 
         self.class_key_df = pd.read_csv(class_key_path)
@@ -261,9 +261,8 @@ class EK_Dataset_pretrain_batchwise(Dataset):
 
         # intializing the first batch
         self.batch_size = batch_size
-        self.num_batches = int(training_num_samples/batch_size)
         selector = Selector(self.training_data, option='fullyconnected', train_ratio=selector_train_ratio)
-        self.rand_selection_indices = selector.get_minibatch_indices('train', self.batch_size, self.num_batches)
+        self.rand_selection_indices = selector.get_minibatch_indices('train', self.batch_size, self.train_num_batches)
         self.val_indices = selector.get_minibatch_indices('val', self.batch_size, 40)
     
     @staticmethod
