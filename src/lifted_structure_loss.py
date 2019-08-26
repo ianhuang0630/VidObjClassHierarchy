@@ -6,10 +6,13 @@ from torch.autograd import Variable
 import numpy as np
 
 class HierarchicalLiftedStructureLoss(nn.Module):
-    def __init__(self, m, device, penalties=[0,2,4], hard_mining='hard_positive', **kwargs):
+    def __init__(self, m, device, penalties=[0,2,4], 
+                negative_mining = 'everything', 
+                hard_mining='hard_positive', **kwargs):
         super(HierarchicalLiftedStructureLoss, self).__init__()
         self.penalties = penalties
         self.hard_mining = hard_mining
+        self.everything = negative_mining=='everything'
         self.m = m
         if self.m <=2:
             raise ValueError('Cannot have groupsize less than 2.')
@@ -46,7 +49,6 @@ class HierarchicalLiftedStructureLoss(nn.Module):
         Returns:
             loss: hierarchical lifted structure loss
         """
-
         loss = 0#Variable(torch.Tensor([0]).squeeze(), requires_grad=True)
         c = 0
 
@@ -74,8 +76,8 @@ class HierarchicalLiftedStructureLoss(nn.Module):
             if self.device=='gpu':
                 J_ijs = J_ijs.to('cuda:0')
 
+
             for i in range(n):
-                
                 pos_pair_ = torch.masked_select(dist_sqrd[i], targets[i] == 0)
 
                 pos_pair_indices = torch.masked_select(indices, targets[i] == 0) # list of indices in dist_sqrd that are positive samples
@@ -111,26 +113,35 @@ class HierarchicalLiftedStructureLoss(nn.Module):
 
                     if len(neg_pair_left) == 0: # determined by target matrix
                         continue
-                    elif len(neg_pair_left) >= self.num_instances_left[idx]:
+                    elif len(neg_pair_left) >= self.num_instances_left[idx] and not self.everything:
                         neg_pairs_left = torch.sort(neg_pair_left)[0][:self.num_instances_left[idx]]
+                    elif self.everything:
+                        neg_pairs_left = torch.sort(neg_pair_left)[0]
                     else: # not greater than self.num_instances_left
                         neg_pairs_left = neg_pair_left
 
                     neg_pair_right = torch.masked_select(dist_sqrd[pos_pair_indices[pos_pair_idx]], targets[pos_pair_indices[pos_pair_idx]] == p)
                     if len(neg_pair_right) == 0:
                         continue
-                    elif len(neg_pair_right) >= self.num_instances_right[idx]:
+                    elif len(neg_pair_right) >= self.num_instances_right[idx] and not self.everything:
                         neg_pairs_right = torch.sort(neg_pair_right)[0][:self.num_instances_right[idx]]
+                    elif self.everything:
+                        neg_pairs_right = torch.sort(neg_pair_right)[0]
                     else: # not greater than self.num_instances_right
                         neg_pairs_right = neg_pair_right
 
+                    # assert torch.all(neg_pairs_left >= 0) and torch.all(neg_pairs_right >= 0),\
+                    #     '{} and {} should be non-negative'.format(neg_pairs_left, neg_pairs_right)
+
                     new_log = torch.log(torch.sum(
                         torch.cat(
-                            (torch.exp(torch.abs(p-neg_pairs_left)),
-                            torch.exp(torch.abs(p-neg_pairs_right)))
+                            (
+                                torch.exp(torch.abs(p-torch.sqrt(self.max(neg_pairs_left)))),
+                                torch.exp(torch.abs(p-torch.sqrt(self.max(neg_pairs_right))))
+                            )
                         ), 0, keepdim=True
                         ))
-                    logs = torch.cat((logs, new_log))
+                    logs = torch.cat((logs, new_log))  # this will change the upperbound
 
                     # # calculate the loss
                     # logs = torch.cat((logs,
@@ -140,11 +151,9 @@ class HierarchicalLiftedStructureLoss(nn.Module):
                     # logs = torch.cat((logs,
                     #     torch.logsumexp(torch.abs(p-neg_pairs_right), dim=0, keepdim=True)))
                     #     # torch.log(torch.sum(torch.exp(torch.abs(p-neg_pairs_right))))), 0
-
+                import ipdb; ipdb.set_trace()
                 J_ij = torch.sum(logs, 0, keepdim=True) + pos_pair
                 J_ijs = torch.cat((J_ijs , self.max(J_ij).pow(2)), 0)
-                if torch.sum(J_ijs) == 0:
-                    import ipdb; ipdb.set_trace()
 
             if len(J_ijs) == 0:
                 loss += torch.sum(J_ijs)
@@ -152,9 +161,6 @@ class HierarchicalLiftedStructureLoss(nn.Module):
             else:
                 loss += 1/len(J_ijs) * torch.sum(J_ijs)
                 c += 1
-
-        if loss == 0:
-            import ipdb; ipdb.set_trace()
 
         return loss/c
 
