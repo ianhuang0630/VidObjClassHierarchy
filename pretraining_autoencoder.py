@@ -37,7 +37,8 @@ def pretrain_batchwise(net, dataloader, valset, optimizer_type='sgd', num_epochs
     if not os.path.exists(model_saveloc):
         os.makedirs(model_saveloc, exist_ok=True)
     
-    criterion = HierarchicalLiftedStructureLoss(8, 'gpu' if USECUDA else 'cpu', hard_mining='random_positive')
+    criterion = HierarchicalLiftedStructureLoss(20, 'gpu' if USECUDA else 'cpu', hard_mining='random_positive')
+    
     if optimizer_type=='sgd':
         optimizer = torch.optim.SGD(net.parameters(), lr)
     elif optimizer_type == 'adam':
@@ -49,7 +50,6 @@ def pretrain_batchwise(net, dataloader, valset, optimizer_type='sgd', num_epochs
 
     for epoch in range(num_epochs):
         print('training on epoch {}'.format(epoch))
-
         for i, sample in enumerate(tqdm(dataloader)):
             # sample shape: [MINI_BATCH_SIZE, BATCH_SIZE, 512, TIMESTEPS, 7, 7]
             # what this script is used to: [BATCH_SIZE, 512, TIMESTEPS, 7, 7]
@@ -464,7 +464,7 @@ if __name__=='__main__':
                 processed_frame_number=time_normalized_dimension, 
                 individual_transform=resnet_trans_indiv if args.feature_extractor=='resnet' else composed_trans_indiv, 
                 batchwise_transform=composed_trans_pair,
-                training_num_samples=args.num_samples, 
+                training_num_batches=args.num_samples, 
                 crop_type=args.crop_mode,
                 sampling_mode=args.sampler_mode,
                 mode='resnet' if args.feature_extractor=='resnet' else 'noresnet',
