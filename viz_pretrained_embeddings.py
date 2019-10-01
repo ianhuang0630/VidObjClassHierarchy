@@ -13,9 +13,9 @@ from torch.nn.modules.pooling import AvgPool3d
 from data.transforms import *
 
 try:
-    from data.EK_dataloader import EK_Dataset_pretrain_pairwise
+    from data.EK_dataloader import *
 except:
-    from EK_dataloader import EK_Dataset_pretrain_pairwise
+    from EK_dataloader import *
 
 USECUDA = True 
 
@@ -135,6 +135,82 @@ def viz_resnet_embeddings(dataset_path, visualize_section='training'):
 
     return embeddings#, frames 
 
+def viz_pretraining_framelevel_pred_embeddings(model, dataset_path, visualize_section='training'):
+    model_dir = os.path.dirname(dataset_path)
+    with open(os.path.join(model_dir, 'config.json'), 'r') as f:
+        config = json.load(f)
+    with open(os.path.join(model_dir, 'processing_params.pkl'), 'rb') as f:
+        processing_params = pickle.load(f)
+
+    with open(dataset_path, 'rb') as f:
+        dataset = pickle.load(f)
+
+    data = dataset['train_set' if visualize_section=='training' else 'val_set']
+
+    if len(data) > 1000:
+        data = np.random.choice(data, 1000, replace=False)
+    net = torch.load(model)
+    net.eval()
+
+    embeddings = []
+
+    for sample in tqdm(data):
+        processed_frames = EK_Dataset_pretrain_framewise_prediction.process(sample, 
+                            processing_params['noun_dict'], processing_params['image_transform'], 
+                            processing_params['image_data_folder'], processing_params['knowns'])
+        frame = processed_frames['frame']
+        label = processed_frames['noun_label']
+
+        if USECUDA:
+            frame = frame.type(torch.FloatTensor).to('cuda:0')
+            net = net.to('cuda:0')
+
+        with torch.no_grad():
+
+            encoding = net(frame.unsqueeze(0))['embedding'][0]
+            embeddings.append((encoding.data.cpu().numpy(), label))
+
+    return embeddings
+
+def viz_pretraining_batchwise_embeddings(model, dataset_path, visualize_section='training'):
+    model_dir = os.path.dirname(dataset_path)
+    with open(os.path.join(model_dir, 'config.json'), 'r') as f:
+        config = json.load(f)
+    with open(os.path.join(model_dir, 'processing_params.pkl'), 'rb') as f:
+        processing_params = pickle.load(f)
+
+    with open(dataset_path, 'rb') as f:
+        dataset = pickle.load(f)
+
+    assert 'all_data' in dataset and 'train_indices' in dataset and 'val_indices' in dataset
+    assert visualize_section=='training' or visualize_section=='validation'
+
+    all_data = dataset['all_data']
+    indices = dataset['train_indices' if visualize_section=='training' else 'val_indices']
+
+    net = torch.load(model)
+    net.eval()
+
+    processing_params = [processing_params[element] for element in ["output_cache_fullpath", "crop_type", "processed_frame_number","f2bbox", 
+                                                                    "image_data_folder", "noun_dict", "knowns", "unknowns", "unknown_lowest_level_label", 
+                                                                    "individual_transform", "batchwise_transform"]]
+    unique_indices = list(set(np.hstack(indices).tolist()))
+    embeddings = []
+    for idx in tqdm(unique_indices):
+        sample = all_data[idx]
+        processed_frames = EK_Dataset_pretrain_batchwise.process(*([[sample]]+processing_params), overwrite=True)
+        frames = torch.stack(processed_frames['batch_frames'])
+        label = processed_frames['noun_labels'][0] # there is only one frame
+
+        if USECUDA:
+            frames = frames.type(torch.FloatTensor).to('cuda:0')
+            net = net.to('cuda:0')
+        with torch.no_grad():
+            encoding = net(torch.cat([frames,frames], 0))[0] # duplication because of squeeze
+        embeddings.append((encoding.data.cpu().numpy(), label))
+
+    return embeddings
+
 def viz_pretraining_pairwise_embeddings(model, dataset_path, visualize_section='training'):
     model_dir = os.path.dirname(dataset_path)
     with open(os.path.join(model_dir, 'config.json'), 'r') as f:
@@ -188,8 +264,12 @@ def viz_pretraining_pairwise_embeddings(model, dataset_path, visualize_section='
 def apply_TSNE(embeddings, output_dimensions=2, perplexity=30.0):
     assert output_dimensions in {2,3}, 'output_dimensions neeed to be either 2 or 3'
 
+
     uniques = embeddings
     uniques_vecs = np.array([element[0] for element in uniques])
+    if np.all([element.size == output_dimensions for element in uniques_vecs]):
+        print('Already in required dimensionality, just choosing these.')
+        return embeddings
 
     if not all([element.size==output_dimensions for element in uniques_vecs]):
         embedded = TSNE(n_components=output_dimensions, perplexity=perplexity, verbose=10).fit_transform(uniques_vecs)
@@ -259,6 +339,16 @@ def apply_TSNE_pairs(embeddings, output_dimensions=2, perplexity=30.0):
     return embedded, reference_indices
 
 if __name__=='__main__':
+
+    b = viz_pretraining_framelevel_pred_embeddings('models/pretraining_tree/framelevel_pred_run0/net_epoch0.pth',
+                            'models/pretraining_tree/framelevel_pred_run0/data_info.pkl', visualize_section = 'training')
+
+    a = viz_pretraining_batchwise_embeddings('models/pretraining_tree/batchwise_run12/net_epoch0.pth',
+                            'models/pretraining_tree/batchwise_run12/data_info.pkl', visualize_section = 'training')
+
+    import ipdb; ipdb.set_trace()
+
+
     #resnet_training_embeddings = viz_resnet_embeddings('models/pretraining_tree/pairwise_run0/data_info.pkl', visualize_section='training')
     resnet_validation_input = viz_resnet_embeddings('models/pretraining_tree/pairwise_run0/data_info.pkl', visualize_section='validation')
 

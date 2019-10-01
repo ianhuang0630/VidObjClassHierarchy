@@ -151,7 +151,7 @@ class HierarchicalLiftedStructureLoss(nn.Module):
                     # logs = torch.cat((logs,
                     #     torch.logsumexp(torch.abs(p-neg_pairs_right), dim=0, keepdim=True)))
                     #     # torch.log(torch.sum(torch.exp(torch.abs(p-neg_pairs_right))))), 0
-                import ipdb; ipdb.set_trace()
+                # import ipdb; ipdb.set_trace()
                 J_ij = torch.sum(logs, 0, keepdim=True) + pos_pair
                 J_ijs = torch.cat((J_ijs , self.max(J_ij).pow(2)), 0)
 

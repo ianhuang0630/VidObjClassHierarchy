@@ -12,11 +12,12 @@ import cv2
 import pandas as pd
 
 import sys
-sys.path.insert(0, './')
+sys.path.insert(0, 'src')
 sys.path.insert(0, 'utilities/maskrcnn-benchmark/demo')
 sys.setrecursionlimit(1000) # same as ipython
 # necessary for maskrcnn
-import object_detection_modules, processing_modules
+import object_detection_modules
+import processing_modules
 from maskrcnn_benchmark.config import cfg
 
 
@@ -76,7 +77,7 @@ class InputLayer(object):
         assert len(filtered_bboxes)>0
         return [ element[0] for element in filtered_bboxes ]
 
-    def get_feature_layer(self, image_locs):
+    def get_feature_layer(self, image_locs, results_format='vector'):
         for image_loc in image_locs:
             assert os.path.exists(image_loc), '{} does not exist.'.format(image_loc)
         # outputs singlwe vector, concatenation of all features
@@ -136,10 +137,19 @@ class InputLayer(object):
                 object_bounding_boxes[:len(concat)] = concat
             
             # left box, right box, left joints, right joints, object_bounding_box
-            results.append(np.concatenate([left_bbox, right_bbox, left_pose, right_pose, object_bounding_boxes]))
-        
+            if results_format=='vector': 
+                results.append(np.concatenate([left_bbox, right_bbox, left_pose, right_pose, object_bounding_boxes]))
+            elif results_format == 'dictionary':
+                results.append({'left_bbox': left_bbox,
+                                'right_bbox': right_bbox,
+                                'left_pose': left_pose,
+                                'right_pose': right_pose,
+                                'object_bounding_boxes': object_bounding_boxes})
+
         # concatenate each of them vertically to make NxT
-        results = np.vstack(results).transpose()
+        if results_format == 'vector': 
+            results = np.vstack(results).transpose()
+
         return results 
                 
 if __name__=='__main__':

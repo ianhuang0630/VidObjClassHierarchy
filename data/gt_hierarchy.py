@@ -106,6 +106,9 @@ def get_tree_position(class_, known_classes, tree_file='hierarchyV1.json'):
                 if layer3_class == class_ and layer3_class in known_classes_set:
                     encoding = np.array([counter1, counter2, counter3])
                     counter3 += 1
+                elif layer3_class == class_ and layer3_class not in known_classes_set:
+                    encoding = np.array([counter1, counter2, -1])
+                    counter3 += 1
                 elif layer3_class in known_classes_set:
                     counter3 += 1
             counter2 += 1
@@ -127,7 +130,7 @@ def get_noun_class_frame_frequency(object_file_path):
 # must be in the training known section
 def get_known_unknown_split(tree_file='hierarchyV1.json', 
                             required_training_knowns='EK_Imagenet_intersection.txt',
-                            max_training_knowns = 8,
+                            max_training_knowns = None,
                             label_csv_path = '/vision/group/EPIC-KITCHENS/annotations/EPIC_train_object_labels.csv',
                             noun_key_path = '/vision/group/EPIC-KITCHENS/annotations/EPIC_noun_classes.csv',
                             select_random_classes = True):
@@ -148,29 +151,33 @@ def get_known_unknown_split(tree_file='hierarchyV1.json',
             lines = f.read()
 
         required_training_knowns = [element for element in lines.split('\n') if len(element)>0]
-        if len(required_training_knowns) > max_training_knowns:
-            # choose a subset of them
-            # if random:
-            if select_random_classes:
+        # choose a subset of them
+        # if random:
+        if select_random_classes:
+            if max_training_knowns is not None and len(required_training_knowns) > max_training_knowns:
                 include_training_knowns = np.random.choice(required_training_knowns, max_training_knowns, replace=False).tolist()
-
             else:
-                counts = get_noun_class_frame_frequency(label_csv_path)
-                # TODO: maximize frequency of the max_training_knowns
-                class_key_df = pd.read_csv(noun_key_path)
-                class_key_dict = dict(zip(class_key_df.class_key, class_key_df.noun_id))
+                include_training_knowns = required_training_knowns
 
-                required_and_counts = []
-                for class_ in required_training_knowns:
-                    if class_key_dict[class_] not in counts:
-                        print('WARNING: {} NOT DETECTED'.format(class_))
-                        required_and_counts.append((class_, 0))
-                    else:
-                        required_and_counts.append((class_, counts[class_key_dict[class_]]))
+        else:
+            counts = get_noun_class_frame_frequency(label_csv_path)
+            # TODO: maximize frequency of the max_training_knowns
+            class_key_df = pd.read_csv(noun_key_path)
+            class_key_dict = dict(zip(class_key_df.class_key, class_key_df.noun_id))
 
-                include_training_knowns = [element[0] for element in sorted(required_and_counts, key=lambda x: x[1], reverse=True)][:max_training_knowns]
+            required_and_counts = []
+            for class_ in required_training_knowns:
+                if class_key_dict[class_] not in counts:
+                    print('WARNING: {} NOT DETECTED'.format(class_))
+                    required_and_counts.append((class_, 0))
+                else:
+                    required_and_counts.append((class_, counts[class_key_dict[class_]]))
+            include_training_knowns = [element[0] for element in sorted(required_and_counts, key=lambda x: x[1], reverse=True)]
 
-            found = {element: False for element in include_training_knowns}
+            if max_training_knowns is not None and len(required_training_knowns) > max_training_knowns:
+                include_training_knowns = include_training_knowns[:max_training_knowns]
+
+        found = {element: False for element in include_training_knowns}
     
     assert os.path.exists(tree_file), '{} does not exist'.format(tree_file)
     with open(tree_file, 'r') as f:
@@ -196,7 +203,6 @@ def get_known_unknown_split(tree_file='hierarchyV1.json',
             # training known, testing unknown, training unknown
         
             
-            a = int(np.ceil(len(this_branch_candidates)/3.0))
             # a = int(np.ceil((len(this_branch_candidates) + num_required_training_unknowns)/3.0))
             # if num_required_training_unknowns > a:
             #     b = num_required_training_unknowns
@@ -204,6 +210,14 @@ def get_known_unknown_split(tree_file='hierarchyV1.json',
             #     b = a - num_required_training_unknowns
             
             # TODO: FIX WASTE!!!
+
+            # when max_training_knowns == None, we want all training_knowns to be required_training_knowns
+            # when max_training_knowns != None, and max_training_knowns > len(required_training_knowns) 
+            # we want the training_knowns to be required_training_knowns + some from each branch adding up to max_training_knowns
+            # when max_training_boxes != NOne and max_training_knowns < len(required_training_knowns)
+            # training_knowns will be the subset of required_training_knowns of size max_training_knowns, and everything is allocated to training_unknown and testing_unknown
+            a = int(np.ceil(len(this_branch_candidates)/3.0))
+
             training_known = this_branch_candidates [:a]
             training_knowns.extend(training_known)
             training_unknown= this_branch_candidates [a:2*a]
@@ -211,8 +225,31 @@ def get_known_unknown_split(tree_file='hierarchyV1.json',
             testing_unknown = this_branch_candidates [2*a:]
             testing_unknowns.extend(testing_unknown)
     
-     
-    training_knowns = include_training_knowns + np.random.choice(training_knowns, max_training_knowns - len(include_training_knowns), replace=False).tolist()
+    if max_training_knowns is None:
+        # move training_knowns evenly into training_unknowns and testing_unknowns
+        training_unknowns.extend(training_knowns[:int(len(training_knowns)/2)])
+        testing_unknowns.extend(training_knowns[int(len(training_knowns)/2):])
+        # replace training_knowns with all include_training_knowns
+        training_knowns = include_training_knowns
+        
+    elif max_training_knowns > len(required_training_knowns):
+        temp = include_training_knowns + training_knowns[:(max_training_knowns - len(required_training_knowns))]
+        unused_training_knowns = training_knowns[(max_training_knowns - len(required_training_knowns)) :]
+        training_unknowns.extend(unused_training_knowns[:int(len(unused_training_knowns)/2)])
+        testing_unknowns.extend(unused_training_knowns[int(len(unused_training_knowns)/2):])
+        training_knowns = temp
+
+    elif max_training_knowns <= len(required_training_knowns):
+        # move training_knowns evenly into training_unknowns and testing_unknowns
+        training_unknowns.extend(training_knowns[:int(len(training_knowns)/2)])
+        testing_unknowns.extend(training_knowns[int(len(training_knowns)/2):])
+        # replace training_knowns with all include_training_knowns
+        training_knowns = include_training_knowns
+
+    # if max_training_knowns is not None:
+    #     training_knowns = include_training_knowns + np.random.choice(training_knowns, max_training_knowns - len(include_training_knowns), replace=False).tolist()
+    # else:
+    #     training_knowns = include_training_knowns
 
     assert all(list(found.values())), \
             '{} were not found in the hierarchy. Check spelling in original file.'.format([element for element in found if not found[element]])

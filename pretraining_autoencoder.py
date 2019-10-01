@@ -16,8 +16,9 @@ from torchvision import transforms
 from src.tree_encoder import *
 from src.ltfb import *
 from src.lifted_structure_loss import *
+from src.hierarchical_loss import *
 
-from data.EK_dataloader import EK_Dataset, EK_Dataset_pretrain, EK_Dataset_pretrain_pairwise, EK_Dataset_pretrain_batchwise
+from data.EK_dataloader import *
 from data.gt_hierarchy import *
 from data.transforms import *
 
@@ -28,8 +29,101 @@ from tqdm import tqdm
 
 DEBUG = False 
 USECUDA = True 
-MODE = 'batchwise'
+MODE = 'framelevel_treeprediction'
 USERESNET = False # True
+
+def pretrain_treelevelpred(net, dataloader, valset, optimizer_type='sgd', num_epochs=10, save_interval=1, lr=0.01,
+        model_saveloc='models/pretraining_tree/treelevelpredictor'):
+
+    # designed according to 2017's paper: Hierarchical loss for classification
+    # root gets 1/2 weight, next layer gets 1/4 weight, next layer gets 1/4 weight...
+    if not os.path.exists(model_saveloc):
+        os.makedirs(model_saveloc, exist_ok=True)
+    
+    criterion = HierarchicalLoss()
+
+    if optimizer_type=='sgd':
+        optimizer = torch.optim.SGD(net.parameters(), lr)
+    elif optimizer_type == 'adam':
+        optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+
+    loss_per_sample = []
+    val_losses_per10 = []
+    counter = 0
+
+
+    for epoch in range(num_epochs):
+        print('training on epoch {}'.format(epoch))
+        for i, sample in enumerate(tqdm(dataloader)):
+
+            frame = sample['frame']
+            hierarchy_encoding = sample['hierarchy_encoding']
+
+            if USECUDA:
+                frame = frame.type(torch.FloatTensor).to('cuda:0')
+                hierarchy_encoding = hierarchy_encoding.type(torch.FloatTensor).to('cuda:0')
+                net = net.to('cuda:0')
+
+            optimizer.zero_grad() 
+            results = net(frame)
+
+            # make list of the relevant predictions
+            loss = criterion([results['tree_level_pred1'], results['tree_level_pred2'], results['tree_level_pred3']], sample['hierarchy_encoding'])
+            loss_per_sample.append(loss.data.cpu().numpy())
+            loss.backward()
+            optimizer.step()
+
+            if counter % 10 == 0: 
+                with open(os.path.join(model_saveloc, 'training_losses.pkl'.format(epoch)), 
+                            'wb') as f:
+                    pickle.dump(loss_per_sample, f)
+                
+                # validate on valset 
+                val_losses = []
+                for val_sample in valset:
+                    val_frame = val_sample['frame']
+                    # val_batch_size = val_batch_stacked.shape[0]
+                    # val_mini_batch_size = val_batch_stacked.shape[1]
+
+                    # val_batch_stacked = val_batch_stacked.reshape([val_batch_size*val_mini_batch_size]+list(val_batch_stacked.shape[2:]))
+                    val_hierarchy_encoding = val_sample['hierarchy_encoding']
+
+                    if USECUDA:
+                        val_frame = val_frame.type(torch.FloatTensor).to('cuda:0')
+                        val_hierarchy_encoding = val_hierarchy_encoding.type(torch.FloatTensor).to('cuda:0')
+                        net = net.to('cuda:0')
+                    with torch.no_grad():
+
+                        # val_encodings = val_encodings.reshape((val_batch_size, val_mini_batch_size, -1))
+                        val_frame = val_frame.unsqueeze(0)
+                        val_results = net(val_frame)
+
+                        val_hierarchy_encoding = val_hierarchy_encoding.unsqueeze(0)
+                        val_loss = criterion([val_results['tree_level_pred1'], 
+                                            val_results['tree_level_pred2'], 
+                                            val_results['tree_level_pred3']], 
+                                            val_hierarchy_encoding)
+
+                        val_losses.append(val_loss.data.cpu().numpy())
+                val_losses_per10.append(np.mean(val_losses))
+                
+                with open(os.path.join(model_saveloc, 'validation_losses.pkl'.format(epoch)), 
+                            'wb') as f:
+                    pickle.dump(val_losses_per10, f)
+                # import ipdb; ipdb.set_trace()
+
+            counter += 1
+
+        if epoch % save_interval == 0:
+            print('current loss: {}'.format(str(loss)))
+            with open(os.path.join(model_saveloc, 'training_losses.pkl'.format(epoch)), 
+                'wb') as f:
+                pickle.dump(loss_per_sample, f)
+            torch.save(net, os.path.join(model_saveloc,
+                'net_epoch{}.pth'.format(epoch)))
+    return net
+
+
 
 def pretrain_batchwise(net, dataloader, valset, optimizer_type='sgd', num_epochs=10, save_interval=1, lr=0.01,
         model_saveloc='models/pretraining_tree/pairwise'):
@@ -38,7 +132,7 @@ def pretrain_batchwise(net, dataloader, valset, optimizer_type='sgd', num_epochs
         os.makedirs(model_saveloc, exist_ok=True)
     
     criterion = HierarchicalLiftedStructureLoss(20, 'gpu' if USECUDA else 'cpu', hard_mining='random_positive')
-    
+
     if optimizer_type=='sgd':
         optimizer = torch.optim.SGD(net.parameters(), lr)
     elif optimizer_type == 'adam':
@@ -346,7 +440,8 @@ if __name__=='__main__':
     # splitting known and unknown data
     if DEBUG:
         if not os.path.exists('current_split.pkl'):
-            split = get_known_unknown_split(max_training_knowns=args.max_training_knowns)
+            split = get_known_unknown_split(required_training_knowns= 'EK_COCO_Imagenet_intersection.txt',
+                                         max_training_knowns=args.max_training_knowns)
             # saving into 'current_split.pkl'
             with open('current_split.pkl', 'wb') as f:
                 pickle.dump(split, f)
@@ -356,7 +451,8 @@ if __name__=='__main__':
             with open('current_split.pkl', 'rb') as f:
                 split = pickle.load(f)
     else:
-        split = get_known_unknown_split(max_training_knowns=args.max_training_knowns)
+        split = get_known_unknown_split(required_training_knowns= 'EK_COCO_Imagenet_intersection.txt',
+                                         max_training_knowns=args.max_training_knowns)
 
     knowns = split['training_known']
     unknowns = split['training_unknown']
@@ -384,6 +480,8 @@ if __name__=='__main__':
         chosen_model_class = C3D_simplified
     elif args.model_mode == 'ltfb':
         chosen_model_class = LongTermFeatureBank
+    elif args.model_mode == 'treelevel':
+        chosen_model_class = TreeLevelPredictor
     else:
         chosen_model_class = C3D
 
@@ -455,7 +553,7 @@ if __name__=='__main__':
         if not os.path.exists(model_saveloc):
             os.makedirs(model_saveloc, exist_ok=True)
 
-        mini_batch_size = 20
+        mini_batch_size = 10
         DF = EK_Dataset_pretrain_batchwise(knowns, unknowns,
                 train_object_csvpath, train_action_csvpath, 
                 class_key_csvpath, image_data_folder,
@@ -486,6 +584,36 @@ if __name__=='__main__':
                     embedding_dim=args.embedding_dim) # TODO: replace these
 
         pretrain_batchwise(model, train_dataloader, valset, optimizer_type=args.optimizer, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
+
+    elif MODE == 'framelevel_treeprediction':
+
+        model_saveloc = os.path.join(args.model_folder, 'framelevel_pred_run{}'.format(args.run_num))
+        if not os.path.exists(model_saveloc):
+            os.makedirs(model_saveloc, exist_ok=True)        
+        
+        # making image dataset
+        DF = EK_Dataset_pretrain_framewise_prediction(knowns, unknowns,
+                train_object_csvpath, train_action_csvpath, 
+                class_key_csvpath, image_data_folder,
+                model_saveloc,
+                crop_type=args.crop_mode,
+                mode='resnet' if args.feature_extractor=='resnet' else 'noresnet')
+
+        valset = DF.get_val_dataset()
+
+        # now save DF.training_data, as well as DF.val_indices and DF.random_selection_indices
+        with open(os.path.join(model_saveloc, 'data_info.pkl'), 'wb') as f:
+            pickle.dump({'train_set': DF.train_frame_set, 'val_set': DF.val_frame_set}, f)
+
+        train_dataloader= data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
+        save_training_config(os.path.join(model_saveloc, 'config.json'), args, knowns, num_samples=len(DF))
+
+        model = chosen_model_class(input_shape=(in_channels, 
+                    image_normalized_dimensions[0] if not args.feature_extractor=='resnet' else 7, 
+                    image_normalized_dimensions[1] if not args.feature_extractor=='resnet' else 7), 
+                    embedding_dim=args.embedding_dim)
+
+        pretrain_treelevelpred(model, train_dataloader, valset, optimizer_type=args.optimizer, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
 
     else:
         raise ValueError('invalid mode')

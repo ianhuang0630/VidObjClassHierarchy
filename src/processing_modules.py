@@ -66,8 +66,7 @@ class HandPositionEstimator(object):
         # Start TF
         self.gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)
         self.sess = tf.Session(config=tf.ConfigProto(gpu_options=self.gpu_options))
-
-        self.net.init(self.sess, weight_files=self.model_weight_files)
+        self.net_init = False
 
     def process(self, image_list):
         """
@@ -76,8 +75,8 @@ class HandPositionEstimator(object):
                 image, and the second item being a RGB matrix.
         """
         results = []
-        print('Extracting masks...')
-        for image_name, image_raw in tqdm(image_list):
+        # print('Extracting masks...')
+        for image_name, image_raw in image_list:
             
             save_name = os.path.join(self.cache_loc,
                     ('#'.join(image_name.split('/')[-3:])[:-self.extension_length])+'.pkl')
@@ -88,6 +87,12 @@ class HandPositionEstimator(object):
                     results.append(pickle.load(f))
 
             else:
+                # now we know that we have to instantiate the model, 
+                # because sample not previously cached.
+                if not self.net_init:
+                    self.net.init(self.sess, weight_files=self.model_weight_files)
+                    self.net_init = True
+
                 image_raw_shape = image_raw.shape[:2] 
                 image_raw = imresize(image_raw, (240, 320))
                 image_v = np.expand_dims((image_raw.astype('float') / 255.0) - 0.5, 0)
@@ -227,8 +232,8 @@ class HandDetector(object):
         """
         hands = [] 
         # finding the two largest contiguous area
-        print('extracting bounding boxes')
-        for mask_tuple in tqdm(masks):
+        # print('extracting bounding boxes')
+        for mask_tuple in masks:
             image_name = mask_tuple[0]
             mask = mask_tuple[1]
 
@@ -392,8 +397,8 @@ class HandMeshPredictor(object):
                 as well as other information
         """
         hand_mesh_list = []
-        print('Extracting hand pose and hand mesh...')
-        for image_name, hand_info in tqdm(image_list):
+        # print('Extracting hand pose and hand mesh...')
+        for image_name, hand_info in image_list:
             save_name = os.path.join(self.cache_loc,
                     ('#'.join(image_name.split('/')[-3:])[:-self.extension_length])+'.pkl')
             
