@@ -108,8 +108,10 @@ class RegionProposer(object):
                     results.append(pickle.load(f))
             else:
                 predictions = self.compute_prediction(image)
-                top_predictions = self.select_top_predictions(predictions)
-                
+                # TODO: select_top_predictions doesn't have any concept of confidence.
+                # top_predictions = self.select_top_predictions(predictions)
+                top_predictions = predictions
+
                 image_result = {'image_name': image_name,
                                 'bounding_boxes': top_predictions.bbox}
 
@@ -138,7 +140,6 @@ class RegionProposer(object):
         with torch.no_grad():
             predictions = self.model(image_list)
         predictions = [o.to(self.cpu_device) for o in predictions]
-
         # always single image is passed at a time
         prediction = predictions[0]
 

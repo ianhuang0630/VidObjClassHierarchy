@@ -30,6 +30,10 @@ except:
     from data.sampler import Selector
     from data.transforms import *
 
+from scipy import stats
+import time
+
+from tqdm import tqdm
 
 DEBUG = False
 
@@ -37,6 +41,25 @@ if DEBUG:
     random.seed(7)
     np.random.seed(7)
 
+
+# from maskrcnn_benchmark.structures.bounding_box import BoxList
+# class COCO_EK_Dataset_detection(EK_Dataset_detection):
+#     def __init__(self, 
+#                 img_height=1080, img_width=1920):
+#         self.img_height = img_height
+#         self.img_width = img_width
+        
+#     def __getitem__(self, idx):
+#         # get the idx_th image,
+
+#         # get the list of bounding boxes
+        
+#         # get the list of knowns and unknowns
+#         pass
+
+#     def get_img_info(self, idx):
+#         return {'height': self.img_height, 'width': self.img_width}
+        
 
 def default_filter_function(d):
     # filters out the ones where there are too few frames present
@@ -49,11 +72,420 @@ def create_config_file(threshold, processed_frame_number, scaling=0.5, cache_dir
     with open (os.path.join(cache_dir, 'config.json'), 'w') as f:
         json.dump(config, f)
 
+class EK_Dataset_detection(Dataset):
+    def __init__(self, knowns, unknowns, object_data_path, action_data_path,
+                class_key_path, image_data_folder, dataset, inputlayer,
+                tree_encoder = 'models/pretraining_tree/framelevel_pred_run0/net_epoch0.pth',
+                device='cuda:0', iou_threshold=0.5, manual_anchors = False, max_num_boxes=200,
+                max_gt_boxes=10, purpose='train'):
+
+        super(EK_Dataset_detection,self).__init__()
+        self.device = device
+        self.knowns = knowns
+        self.unknowns = unknowns
+        self.image_data_folder = image_data_folder
+        self.iou_thresh = iou_threshold
+
+        self.max_num_boxes = max_num_boxes
+        self.max_gt_boxes = max_gt_boxes
+        self.purpose = purpose
+
+        self.class_key_df = pd.read_csv(class_key_path)
+        self.class_key_dict = dict(zip(self.class_key_df.class_key, self.class_key_df.noun_id))
+        self.noun_dict = dict(zip(self.class_key_df.noun_id, self.class_key_df.class_key))
+
+        self.admissible_classes = set(knowns + unknowns)
+        self.admissible_noun_id = set([self.class_key_dict[element] for element in list(self.admissible_classes)])
+
+        # dataset containing the images under known and unknown classes
+        self.dataset = dataset
+        # prune both the known and unknown datasets to static images
+        unknown = self.prune_to_frames(target = 'unknown')
+        known = self.prune_to_frames(target = 'known')
+
+        self.uk_dataset = unknown + known
+        random.shuffle(self.uk_dataset)
+
+        self.manual_anchors = manual_anchors
+
+        if not self.manual_anchors: # we won't be using inputlayer if manual_anchors is True
+            self.inputlayer = inputlayer # this generates the region proposals
+        else:
+            self.anchors = self.generate_anchors()
+            print('{} anchors generated'.format(len(self.anchors)))
+        # for the tree encoder
+        
+        if purpose=='train' and purpose=='test': 
+            self.tree_encoder_location = tree_encoder
+            self.tree_encoder = torch.load(self.tree_encoder_location)
+            self.tree_encoder = self.tree_encoder.to(self.device)
+            self.tree_encoder.eval()
+            self.tree_encoder_transforms = transforms.Compose([transforms.ToPILImage(),
+                                                transforms.Resize((224, 224)),
+                                                transforms.ToTensor(),
+                                                transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                                                                    std=[0.229, 0.224, 0.225]),
+                                                GetResnetFeats()
+                                                ])
+        elif purpose == 'resnet101':
+            assert tree_encoder is None, 'Just for safety, set self.tree_encoder_location to None'
+            self.resnet101 = GetResnetFeatsGeneral(version='resnet101', mode='vec', device=self.device)
+
+            self.tree_encoder = self.tree_encoder_substitute
+            self.tree_encoder_transforms = transforms.Compose([transforms.ToPILImage(),
+                                                transforms.Resize((224, 224)),
+                                                transforms.ToTensor(),
+                                                transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                                                                    std=[0.229, 0.224, 0.225])])
+
+    def tree_encoder_substitute(self, x):
+        with torch.no_grad():
+            res101_embeddings = self.resnet101(x)
+        return {'embedding': res101_embeddings}
+
+    def prune_to_frames(self, target='known_pretrain'):
+        # check that 1: has a bounding box of the known class
+        frames2bbox = self.dataset['known_frame2bbox' if target in ('known_pretrain', 'known') else 'unknown_frame2bbox']
+
+        frames = []
+        print('turning into frames for target {}'.format(target))
+
+        for clip in tqdm(self.dataset[target]):
+            vid_id = clip['video_id']
+            part_id = clip['participant_id']
+            start_frame = clip['start_frame']
+            end_frame = clip['end_frame']
+            
+            a = int(start_frame)
+            while a <= int(end_frame):
+                # process
+                key = '/'.join([part_id, vid_id, str(a)])
+                gt_bboxes = []
+                gt_classes = []
+
+                if key in frames2bbox:
+                    candidates = [bbox for bbox in frames2bbox[key] if bbox['noun_class'] in self.admissible_noun_id]
+                    for element in candidates:
+                        this_bbox = ast.literal_eval(element['bbox'])
+                        if len(this_bbox) > 0:
+                            gt_bboxes.append(this_bbox[0])
+                            gt_classes.append(self.noun_dict[element['noun_class']])
+
+                    # save: vid_id, part_id, a, this_bbox, class
+                    frames.append({'video_id': vid_id,
+                                    'participant_id': part_id,
+                                    'frame_number': a,
+                                    'bboxes': gt_bboxes,
+                                    'noun_classes': gt_classes})
+                a += 30
+
+        # WARNING frames may contain repeats
+
+        return frames
+
+
+    def generate_anchors(self, image_width=1920, image_height=1080, num_w_strides=28, num_h_strides=16, 
+            patterns=[[200,200], [160, 240], [240, 160], [600, 600], [540, 660], [660, 540]]):
+        
+        w_anchor_centers = np.linspace(0, image_width-1, num_w_strides+2)[1:-1]
+        h_anchor_centers = np.linspace(0, image_height-1, num_h_strides+2)[1:-1]
+
+        patterns = np.array(patterns)
+        add = patterns/2
+        
+        all_anchors = []    
+        for h in h_anchor_centers:
+            for w in w_anchor_centers:
+
+                center = np.array([w,h])
+                minus = np.maximum(center-add, np.zeros_like(center-add))
+                plus = np.minimum(center+add, np.array([image_width, image_height]) * np.ones_like(center+add))
+
+                anchors = np.hstack((minus, plus)) # all of these should be centered around w,h
+
+                all_anchors.append(anchors.astype(np.int))
+
+        return all_anchors    
+
+
+
+
+    def crop_and_transform(self, bboxes, image, sample_dict, cache_folder='cache/bounding_box_feature_map', overwrite=True):
+
+        if not os.path.exists(os.path.join(cache_folder, self.purpose)):
+            os.makedirs(os.path.join(cache_folder, self.purpose))
+        video_id = sample_dict['video_id']
+        participant_id = sample_dict['participant_id']
+        frame_number = sample_dict['frame_number']
+        filename = '{}-{}-{}.pkl'.format(participant_id, video_id, frame_number)
+        filepath = os.path.join(os.path.join(cache_folder, self.purpose), filename)
+
+        if os.path.exists(filepath):
+            # print("loading cache {}".format(filepath))
+            with open(filepath, 'rb') as f:
+                crop_tfs = pickle.load(f)
+
+        else:
+            crop_tfs = []
+            # cropping first 
+            for bbox in bboxes:
+                top_left = bbox[:2] # w x h
+                bottom_right = bbox[2:] # w x h
+
+                crop = image[int(top_left[1]):int(bottom_right[1]), int(top_left[0]):int(bottom_right[0]), :]
+                # crop_resz = cv2.resize(crop, tuple([int(dim*scale) for dim in crop.shape[:2][::-1]]))
+                crop = crop[:, :, [2,1,0]]
+
+                crop_tf = self.tree_encoder_transforms(crop)
+                # now pass through transforms
+                crop_tfs.append(crop_tf)
+
+            with open(filepath, 'wb') as f:
+                pickle.dump(crop_tfs, f)
+
+        return torch.stack(crop_tfs)
+
+    def bb_intersection_over_union(self, boxA, boxB):
+        # Topleft and bottomright corners format 
+
+        # fr
+        # determine the (x, y)-coordinates of the intersection rectangle
+        xA = max(boxA[0], boxB[0])
+        yA = max(boxA[1], boxB[1])
+        xB = min(boxA[2], boxB[2])
+        yB = min(boxA[3], boxB[3])
+     
+        # compute the area of intersection rectangle
+        interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)
+     
+        # compute the area of both the prediction and ground-truth
+        # rectangles
+        boxAArea = (boxA[2] - boxA[0] + 1) * (boxA[3] - boxA[1] + 1)
+        boxBArea = (boxB[2] - boxB[0] + 1) * (boxB[3] - boxB[1] + 1)
+     
+        # compute the intersection over union by taking the intersection
+        # area and dividing it by the sum of prediction + ground-truth
+        # areas - the interesection area
+        iou = interArea / float(boxAArea + boxBArea - interArea)
+     
+        # return the intersection over union value
+        return iou
+
+    def get_gt_label(self, noun_name):
+        if noun_name in self.knowns:
+            return 1
+        elif noun_name in self.unknowns:
+            return 2
+        else:
+            raise ValueError('gt_bboxes contain other classes than permissible ones. recheck it.')
+
+    def get_labels(self, predictions, gt_bboxes, gt_noun_classes):
+        # convert gt_bboxes to the corner format, but also in the format width,height instead of height_width
+        gt_bboxes = [np.array(tup) for tup in gt_bboxes]
+        gt_bboxes_corner = [np.hstack([element[:2], element[:2] + element[2:]]) for element in gt_bboxes]
+        gt_bboxes_corner = [np.hstack([element[1], element[0], element[3], element[2]]) for element in gt_bboxes_corner]
+
+        gt_labels = []
+        ious = []
+        # TODO: might be able to parallelize
+        for pred in predictions: #iterating through region proposals
+            this_ious = []
+            this_gt_labels = []
+            for idx, gt_b in enumerate(gt_bboxes_corner): # iterating through groundtruth
+                # evaluate the iou
+                iou = self.bb_intersection_over_union(gt_b, pred)
+                this_ious.append(iou)
+                if iou > self.iou_thresh:
+                    this_gt_labels.append(self.get_gt_label(gt_noun_classes[idx]))
+
+                    # # we "record" what the label is
+                    # if gt_noun_classes[idx] in self.knowns:
+                    #     this_gt_labels.append(1)
+                    # elif gt_noun_classes[idx] in self.unknowns:
+                    #     this_gt_labels.append(2)
+                    # else:
+                    #     ValueError('gt_bboxes contain other classes than permissible ones. recheck it.')
+                else:
+                    # we label this pred as the background
+                    this_gt_labels.append(0)
+            
+            ious.append(this_ious)
+            gt_labels.append(this_gt_labels)
+
+        ious = np.array(ious)
+        # [x for _, x in sorted(zip(Y,X), key=lambda pair: pair[0])]
+            
+        max_iou_gt = [(max(ious[i]), gt_labels[i][np.argmax(ious[i])]) for i in range(len(ious))]
+        max_iou = [element[0] for element in max_iou_gt]
+        max_gt = [element[1] for element in max_iou_gt]
+
+        predictions_sorted_idx = [pred for pred, _ in sorted(zip(range(predictions.shape[0]), max_iou), key=lambda x: x[1], reverse=True)]
+        max_gt = torch.Tensor(max_gt)
+        return predictions_sorted_idx, max_gt
+
+    def check_bbox_validity(self, bboxes, image_width=1920, image_height=1080):
+
+        # rule 1) can't have 0 area, otherwise throw out
+        areas = (bboxes[:,2] - bboxes[:,0])*(bboxes[:,3] - bboxes[:,1])
+        keep_idx = np.where(areas > 0)
+        keep_idx = keep_idx[0]
+        # rule 2) if exceed the bounds of the image, shorten the box
+        new_bboxes = bboxes[keep_idx, :]
+        top_clip = np.minimum(new_bboxes, np.array([image_width,image_height, image_width, image_height]))
+        bottom_clip = np.maximum(new_bboxes, np.array([0,0,0,0]))
+
+        return bottom_clip
+
+    def run_tree_encoder(self, x, sample_dict, cache_folder='cache/bounding_box_embeddings'):
+        if not os.path.exists(os.path.join(cache_folder, self.purpose)):
+            os.makedirs(os.path.join(cache_folder, self.purpose))
+        video_id = sample_dict['video_id']
+        participant_id = sample_dict['participant_id']
+        frame_number = sample_dict['frame_number']
+        filename = '{}-{}-{}.npy'.format(participant_id, video_id, frame_number)
+        filepath = os.path.join(os.path.join(cache_folder, self.purpose), filename)
+
+        if os.path.exists(filepath):
+            # print('Loading embeddings from {}'.format(filepath))
+            embeddings = np.load(filepath)
+        else:
+            x = x.type(torch.FloatTensor).to(self.device)
+            results = self.tree_encoder(x)
+            embeddings = results['embedding'].detach().cpu().numpy()
+            np.save(filepath, embeddings)
+        return torch.Tensor(embeddings)
+
+   
+    def restrict_to_cached(self, cache_embedding='cache/bounding_box_embeddings', 
+                        cache_fmap='cache/bounding_box_feature_map'):
+
+        cache_emb_path = os.path.join(cache_embedding, self.purpose)
+        cache_fmap_path = os.path.join(cache_fmap, self.purpose)
+
+        # check that both cache_files exist
+        uk_dataset_prime = []
+        for sample_dict in tqdm(self.uk_dataset):
+            video_id = sample_dict['video_id']
+            participant_id = sample_dict['participant_id']
+            frame_number = sample_dict['frame_number']
+
+            emb_file = '{}-{}-{}.npy'.format(participant_id, video_id, frame_number)
+            fmap_file = '{}-{}-{}.pkl'.format(participant_id, video_id, frame_number)
+            emb_path = os.path.join(cache_emb_path, emb_file)
+            fmap_path = os.path.join(cache_fmap_path, fmap_file)
+
+            if os.path.exists(emb_path) and os.path.exists(fmap_path):
+                # then we can keep this sample
+                uk_dataset_prime.append(sample_dict)
+
+        print('Of {} frames, {} are preprocessed and cached in this dataset.'\
+            .format(len(self.uk_dataset), len(uk_dataset_prime)))
+        self.uk_dataset = uk_dataset_prime
+
+    def only_unique_frames(self):
+        unique_frame_samples = []
+        unique_frame = set([])
+        unique_frame_indices = set([])
+        print('Finding unique frames...')
+        for idx, sample in enumerate(tqdm(self.uk_dataset)):
+            if (sample['participant_id'], sample['video_id'], sample['frame_number']) not in unique_frame:
+                unique_frame.add((sample['participant_id'], sample['video_id'], sample['frame_number']))
+                unique_frame_samples.append(sample)
+
+        print('Narrowing down from {} frames to {} unique frames'.\
+                format(len(self.uk_dataset), len(unique_frame)))
+
+        self.uk_dataset = unique_frame_samples
+
+    def preprocess_and_cache(self):
+        # find the unique frames in the knowns and unknowns
+        unique_frame = set([])
+        unique_frame_indices = set([])
+        print('Finding unique frames...')
+        for idx, sample in enumerate(tqdm(self.uk_dataset)):
+            if (sample['participant_id'], sample['video_id'], sample['frame_number']) not in unique_frame:
+                unique_frame.add((sample['participant_id'], sample['video_id'], sample['frame_number']))
+                unique_frame_indices.add(idx)
+        print('Saving to cache...')
+        for idx in tqdm(list(unique_frame_indices)):
+            self.__getitem__(idx)
+    
+    def __len__(self):
+        return len(self.uk_dataset)
+
+    def __getitem__(self, idx):
+
+        # get the image at self.data[idx]
+        sample = self.uk_dataset[idx]
+
+        video_id = sample['video_id']
+        participant_id = sample['participant_id']
+        frame_number = sample['frame_number']
+        gt_bboxes= sample['bboxes'] # y_h, x_w, h, w
+        gt_noun_classes = sample['noun_classes']
+        
+        # ground truth labels for ground truth bounding boxes, used during evaluation
+        gt_labels = [self.get_gt_label(element) for element in gt_noun_classes ]
+
+        file_path = participant_id + '/' + video_id + '/' + ('0000000000' + str(frame_number))[-10:]+'.jpg'
+        whole_path = os.path.join(self.image_data_folder, file_path)
+        # run input layer (only detections on it)
+        if not self.manual_anchors:
+            feats = self.inputlayer.get_feature_layer([whole_path], results_format='dictionary')
+            bbox_proposals = [element['object_bounding_boxes'] for element in feats][0]
+            # x1_w, y1_h, x2_w, y2_h
+        else:
+            bbox_proposals = np.vstack(self.anchors) 
+        # first two elements corresponds to top left
+        # second two elements correspodns to bottom = right
+        img = cv2.imread(whole_path)
+        
+        # get labels first, so that we know what ot take out from the 1000 proposals
+        # check validity first
+        bbox_proposals = self.check_bbox_validity(bbox_proposals)
+
+        # using IOU of every bounding box and every ground truth bounding boxes
+        sorted_idx, labels = self.get_labels(bbox_proposals, gt_bboxes, gt_noun_classes)
+
+        # now we're going to cut both embeddings and labels
+        if len(sorted_idx) > self.max_num_boxes:
+            clipped_sorted_idx = sorted_idx[:min(len(sorted_idx), self.max_num_boxes)]
+        else:
+            clipped_sorted_idx = sorted_idx + [0]*(self.max_num_boxes - len(sorted_idx))
+        if len(gt_bboxes) > self.max_gt_boxes:
+            idx = list(range(len(gt_bboxes))) [:self.max_gt_boxes]
+        else:
+            idx = list(range(len(gt_bboxes))) + [0]*(self.max_gt_boxes - len(gt_bboxes))
+
+        # only keeping around a subset of the bboxes and proposals
+        bbox_proposals = bbox_proposals[clipped_sorted_idx]
+        labels = labels[clipped_sorted_idx]
+
+        tf_img_minibatch = self.crop_and_transform(bbox_proposals, img, sample)
+        # pass it through tree encoder
+        # results = self.tree_encoder(tf_img_minibatch)
+        embeddings = self.run_tree_encoder(tf_img_minibatch, sample)
+        # incase what's loaded is bigger than max_num_boxes
+        if len(embeddings)>=self.max_num_boxes:
+            embeddings = embeddings[:self.max_num_boxes, ...]
+        else:
+            raise ValueError('Your cache files need to be regenerated for more bounding boxes')
+        # return the embeddings of the tree encoder
+        bbox_proposals = torch.Tensor(bbox_proposals)
+        gt_bboxes = torch.Tensor(gt_bboxes)[idx]
+        gt_bboxes_labels = torch.Tensor(gt_labels)[idx]
+
+        return {'embeddings': embeddings, 'pred_bboxes': bbox_proposals,
+                'gt_bboxes': gt_bboxes, 'labels': labels, 
+                'gt_bboxes_label': gt_bboxes_labels}
+
+
 class EK_Dataset_discovery(Dataset):
     def __init__(self, knowns, unknowns, object_data_path, action_data_path, 
                 class_key_path, image_data_folder, dataset, inputlayer,
                 tree_encoder = 'models/pretraining_tree/framelevel_pred_run0/net_epoch0.pth',
                 video_transforms = None,
+                video_feat_extract_transforms = None,
                 hand_pose_transforms = None,
                 hand_bbox_transforms = None,
                 embedding_transforms = None,
@@ -61,16 +493,27 @@ class EK_Dataset_discovery(Dataset):
                 image_bbox_scaling = 0.5,
                 filter_function = default_filter_function, 
                 output_cache_folder='dataloader_cache',
+                feature_cache_folder='feature_cache',
+                feature_cache_overwrite = False,
                 device='cuda:0',
                 naive_known=True,
                 naive_unknown=True,
-                snip_threshold = 128):
+                snip_threshold = 128, is_video_baseline=False,
+                use_resnet101 = False):
 
         super(EK_Dataset_discovery, self).__init__()
         self.device = device
 
         self.naive_known = naive_known
         self.naive_unknown = naive_unknown
+    
+        self.is_video_baseline = is_video_baseline
+        # the feature cache folder and overwrite
+        self.feature_cache_folder=feature_cache_folder
+        if not os.path.exists(self.feature_cache_folder):
+            os.makedirs(self.feature_cache_folder, exist_ok=True)
+
+        self.feature_cache_overwrite=feature_cache_overwrite
 
         # sets of knowns and unknowns
         self.knowns = knowns
@@ -84,6 +527,7 @@ class EK_Dataset_discovery(Dataset):
 
         # all transforms
         self.video_transforms = video_transforms
+        self.video_feat_extract_transforms = video_feat_extract_transforms
         self.hand_pose_transforms = hand_pose_transforms
         self.hand_bbox_transforms = hand_bbox_transforms
         self.embedding_transforms = embedding_transforms
@@ -106,7 +550,6 @@ class EK_Dataset_discovery(Dataset):
         # now split the absurdly long clips into shorter ones
         self.snip_threshold = snip_threshold
         self.snip_clips() # changes the length of self.training_data
-
         self.unknown_lowest_level_label = survey_tree(self.knowns)
         
         buffer_ = []
@@ -121,16 +564,32 @@ class EK_Dataset_discovery(Dataset):
         self.inputlayer = inputlayer
 
         # initalizing tree encoder
-        self.tree_encoder_location = tree_encoder
-        self.tree_encoder = torch.load(self.tree_encoder_location)
-        self.tree_encoder = self.tree_encoder.to(self.device)
-        self.tree_encoder.eval()
-        self.tree_encoder_transforms = transforms.Compose([transforms.ToPILImage(),
+        # if use_resnet101 is false
+        if not use_resnet101:
+            self.tree_encoder_location = tree_encoder
+            self.tree_encoder = torch.load(self.tree_encoder_location)
+            self.tree_encoder = self.tree_encoder.to(self.device)
+            self.tree_encoder.eval()
+            self.tree_encoder_transforms = transforms.Compose([transforms.ToPILImage(),
+                                                    transforms.Resize((224, 224)),
+                                                    transforms.ToTensor(),
+                                                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                                                    GetResnetFeats()
+                                                    ])
+        else:
+            assert tree_encoder is None, 'Just for safety, set self.tree_encoder_location to None'
+            self.resnet101 = GetResnetFeatsGeneral(version='resnet101', mode='vec', device=self.device)
+
+            self.tree_encoder = self.tree_encoder_substitute
+            self.tree_encoder_transforms = transforms.Compose([transforms.ToPILImage(),
                                                 transforms.Resize((224, 224)),
                                                 transforms.ToTensor(),
-                                                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-                                                GetResnetFeats()
-                                                ])
+                                                transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                                                                    std=[0.229, 0.224, 0.225])])
+    def tree_encoder_substitute(self, x):
+        with torch.no_grad():
+            res101_embeddings = self.resnet101(x)
+        return {'embedding': res101_embeddings.squeeze(-1).squeeze(-1)}
 
     def snip_clips(self): 
         snip_clips = []
@@ -189,6 +648,7 @@ class EK_Dataset_discovery(Dataset):
         
         a = start_frame
         candidates =[]
+
         while a < end_frame:
             try:
                 bboxes = self.f2bbox[participant_id+'/'+video_id+'/'+str(a)]
@@ -224,7 +684,7 @@ class EK_Dataset_discovery(Dataset):
             return result, choice_index
         else:
             result = np.stack(candidates)
-            return result
+            return result, list(range(len(candidates)))
 
     def crop_and_transform(self, anchor_bboxes, unknown_bbox, frames, idx):
         # choose a bounding box!
@@ -236,20 +696,45 @@ class EK_Dataset_discovery(Dataset):
             # eliminating extra 0's
             bboxes_reshaped = bboxes_reshaped[np.where(np.sum(bboxes_reshaped, 1))[0], :]
             for element in bboxes_reshaped:
-                top_left = element[:2]
-                bottom_right = element[2:]
-                current_frame = frames[timestep][int(np.round(top_left[0])):int(np.round(bottom_right[0])), 
-                                                int(np.round(top_left[1])):int(np.round(bottom_right[1])), :]
+
+
+                # MAJOR BUG FROM PREVIOUS VERSION!
+                x, y, yd, xd = np.round(element)
+
+                # top_left = element[:2] 
+                # bottom_right = element[2:]
+                # current_frame = frames[timestep][int(np.round(top_left[0])):int(np.round(bottom_right[0])), 
+                #                                 int(np.round(top_left[1])):int(np.round(bottom_right[1])), :]
+                current_frame = frames[timestep][int(y):int(y+yd), 
+                                                int(x):int(x+xd), :]
+
                 current_frame = current_frame[:,:,[2,1,0]]
                 current_frame = self.tree_encoder_transforms(current_frame)
                 crop_anchor_frames.append(current_frame)
-        
-        y, x, yd, xd = np.round(unknown_bbox*self.scaling)
-        y, x, yd, xd = int(y), int(x), int(yd), int(xd)
 
-        crop_unknown_frames = frames[idx.item()][y:y+yd, x:x+xd,:]
-        crop_unknown_frames = crop_unknown_frames[:,:,[2,1,0]]
-        crop_unknown_frames = self.tree_encoder_transforms(crop_unknown_frames)
+        if len(unknown_bbox.shape) == 1:
+            y, x, yd, xd = np.round(unknown_bbox)
+            y, x, yd, xd = int(y), int(x), int(yd), int(xd)
+            crop_unknown_frames = frames[idx.item()][y:y+yd, x:x+xd,:]
+            crop_unknown_frames = crop_unknown_frames[:,:,[2,1,0]]
+            crop_unknown_frames = self.tree_encoder_transforms(crop_unknown_frames)
+
+        else:
+            # temp = np.round(unknown_bbox*self.scaling)
+            temp=np.round(unknown_bbox)
+            y = [int(el) for el in temp[:,0].tolist()]
+            x = [int(el) for el in temp[:,1].tolist()]
+            yd = [int(el) for el in temp[:,2].tolist()]
+            xd = [int(el) for el in temp[:,3].tolist()]
+
+            crop_unknown_frames = []
+            for idx, frame in enumerate(frames):
+                crop = frame[y[idx]:y[idx]+yd[idx], x[idx]:x[idx]+xd[idx],:]
+                crop = crop[:, :, [2,1,0]]
+                crop = self.tree_encoder_transforms(crop)
+                crop_unknown_frames.append(crop)
+
+            # import pdb; pdb.set_trace()
 
         return crop_anchor_frames, crop_unknown_frames
 
@@ -305,14 +790,18 @@ class EK_Dataset_discovery(Dataset):
                 this_frame_anchor_bboxes = []
 
                 for candidate in valid_candidates:
-                    this_bbox = np.array(ast.literal_eval(candidate['bbox'])[0])
-                    
+                    if len(ast.literal_eval(candidate['bbox'])) == 0:
+                        this_bbox = np.array([0, 0, int(1080*self.scaling), int(1920*self.scaling)])
+                    else: 
+                        this_bbox = np.array(ast.literal_eval(candidate['bbox'])[0])
+                        
                     y, x, yd, xd = this_bbox
                     y = int(y * self.scaling)
                     x = int(x * self.scaling)
                     yd = int(yd * self.scaling)
                     xd = int(xd * self.scaling)
 
+                    # MAJOR BUG FROM PREVIOUS VERSION! OTHER END IS EXPECTING TOPLEFT-BOTTOMRIGHT format.
                     this_frame_anchor_bboxes.append([y, x, yd, xd])
 
                 anchor_bboxes.append(np.array(this_frame_anchor_bboxes))
@@ -341,9 +830,7 @@ class EK_Dataset_discovery(Dataset):
             self.unknowns_id = [self.class_key_dict[element] for element in self.unknowns]
             self.knowns_id = [self.class_key_dict[element] for element in self.knowns]
 
-
-
-
+        times = [('start_time', time.time())]
 
         sample = self.training_data[idx]
         video_id = sample['video_id']
@@ -356,56 +843,83 @@ class EK_Dataset_discovery(Dataset):
         # get the frames, uncroppped
         # pass through video transforms
         RGB_frames = self.get_frames(participant_id, video_id, start_frame, end_frame)
-        
+        times.append(("RGB_frames_time", time.time()))
+
         # get the hand features, handpose and boundingbox information
         # pass through hand transforms
-        feats = self.get_features(participant_id, video_id, start_frame, end_frame)
+        cache_filename = sample['participant_id'] + '_' + sample['video_id'] \
+                        + '_' + str(sample['start_frame']) + '_' + str(sample['end_frame']) + '.pkl'
+        cache_path = os.path.join(self.feature_cache_folder, cache_filename)
 
+        if os.path.exists(cache_path) and not self.feature_cache_overwrite:
+            with open(cache_path, 'rb') as f:
+                feats = pickle.load(f)
+        else:
+            feats = self.get_features(participant_id, video_id, start_frame, end_frame)
+            with open(cache_path, 'wb') as f:
+                pickle.dump(feats, f)
+
+        times.append(('get_hand_features_time', time.time()))
         handpose = np.stack([np.hstack([element['left_pose'], element['right_pose']]) for element in feats])
         handbbox = np.stack([np.hstack([element['left_bbox'], element['right_bbox']]) for element in feats])
-
+        
         if self.hand_pose_transforms is not None:
             handpose = self.hand_pose_transforms(handpose)
             handpose = torch.Tensor(handpose)
         if self.hand_bbox_transforms is not None:
             handbbox = self.hand_bbox_transforms(handbbox)
             handbbox = torch.Tensor(handbbox)
+        times.append(('hand_feature_time', time.time()))
 
         # get ground truth unknown bounding box
         if self.naive_unknown:
              # get detected bounding boxes
             unknown_bounding_boxes, index = self.get_unknown_bounding_box(
-                                participant_id, video_id, start_frame, end_frame,
-                                noun_class, mode='single')
+                            participant_id, video_id, start_frame, end_frame,
+                            noun_class, mode='single' if not self.is_video_baseline else 'all' )
 
             # get embeddings through g
             # crop the images, push each through the transforms
-
+            times.append(('unknown_bounding_boxes_time', time.time()))
             if self.naive_known:
                 bounding_boxes, anchor_known_class = \
                                 self.select_known_bounding_box(participant_id,
                                     video_id, start_frame, end_frame)
+                times.append(('unknown_bounding_boxes_time', time.time()))
 
             else:
-                bounding_boxes = [element['object_bounding_boxes'] for element in feats]
-            
+                # MAJOR BUG FIX FROM PREVIOUS VERSION
+                # bounding_boxes = [element['object_bounding_boxes'][:2]  for element in feats]
+                bounding_boxes = [np.hstack([element['object_bounding_boxes'][:2], (element['object_bounding_boxes'][2:] - element['object_bounding_boxes'][:2])]) for element in feats]
             crop_anchor_frames, crop_unknown_frames = self.crop_and_transform(
                     bounding_boxes, unknown_bounding_boxes, RGB_frames, index)
-        
-            bundle_crop_frames = torch.stack(crop_anchor_frames + [crop_unknown_frames])
-            a = 0
-            embeddings = []
+            times.append(('crop_and_transform_time', time.time()))
+            if type(crop_unknown_frames) is not list or (type(crop_unknown_frames) is list and len(crop_unknown_frames) == 1):
+                bundle_crop_frames = torch.stack(crop_anchor_frames + [crop_unknown_frames])
+            elif not self.is_video_baseline:
+                bundle_crop_frames = torch.stack(crop_anchor_frames + crop_unknown_frames)
+            else:
+                bundle_crop_frames = torch.stack(crop_unknown_frames)
 
+            a = 0
+
+            embeddings = []
             while a < bundle_crop_frames.shape[0]:
                 this_bundle = bundle_crop_frames[a:min(a+16, bundle_crop_frames.shape[0]), ...]
                 this_bundle = this_bundle.type(torch.FloatTensor).to(self.device)
 
                 these_results = self.tree_encoder(this_bundle)
-                embeddings.append(these_results['embedding'].data)
+                if not self.is_video_baseline:
+                    embeddings.append(these_results['embedding'].data)
+                else:
+                    embeddings.append(torch.stack([torch.argmax(these_results['tree_level_pred1'][:, :3], 1),
+                                        torch.argmax(these_results['tree_level_pred2'], 1),
+                                        torch.argmax(these_results['tree_level_pred3'], 1)]).t())
                 a += 16
 
+
             # naive protection againstscases when crop_anchor_frames is empty
-            if len(crop_anchor_frames) == 0:
+            if not self.is_video_baseline and len(crop_anchor_frames) == 0:
                 filler = torch.zeros_like(embeddings[-1]).to(self.device)
                 embeddings.insert(0, filler)
 
@@ -413,20 +927,35 @@ class EK_Dataset_discovery(Dataset):
 
             if self.embedding_transforms is not None:
                 embeddings = self.embedding_transforms(embeddings)
+            times.append(('visual_encoder_time', time.time()))
 
-            anchor_embeddings = embeddings[:-1, ...]
-            unknown_embeddings = embeddings[-1]
+            if not self.is_video_baseline:
+                anchor_embeddings = embeddings[:-1, ...]
+                unknown_embeddings = embeddings[-1]
+            else:
+                anchor_embeddings = torch.zeros((1,1))
+
+                unknown_embeddings = embeddings
+                # take the majority vote
+                unknown_embeddings = stats.mode(unknown_embeddings.detach().cpu().numpy())[0][0] # first indexing to only get the modes,  second indexing for squeezing
+                unknown_embeddings = torch.Tensor(unknown_embeddings)
 
         # transform RGB_frames
         if self.video_transforms is not None:
-            RGB_frames = self.video_transforms(RGB_frames).squeeze(dim=0)
+            RGB_frames = self.video_transforms(RGB_frames)
+            feat_extract_input = sample.copy()
+            feat_extract_input['RGB'] = RGB_frames
+            RGB_frames = self.video_feat_extract_transforms(feat_extract_input)
+            RGB_frames = torch.Tensor(RGB_frames)
+            RGB_frames = RGB_frames.squeeze(dim=0)
+            times.append(('video_transform_time', time.time()))
 
         # getting encojding
         hierarchy_encoding = get_tree_position(self.noun_dict[noun_class], self.knowns)
         hierarchy_encoding = torch.Tensor(hierarchy_encoding)
         if self.label_transforms is not None:
             hierarchy_encoding = self.label_transforms(hierarchy_encoding)
-
+        times.append(('hierarchy_encoding_time', time.time()))
         if self.naive_unknown:
 
             results_dict = {'handpose': handpose, # [B] * T * 126
@@ -436,6 +965,11 @@ class EK_Dataset_discovery(Dataset):
                             'known': anchor_embeddings, # [B] * num_known * 10
                             'hierarchy_encoding': hierarchy_encoding # [B] * 3
                             }
+        delta_times = []
+        for i in range(1, len(times)):
+            delta_times.append((times[i][0], times[i][1] - times[i-1][1]))
+        # import pdb; pdb.set_trace()
+        # print(delta_times)
 
         return results_dict
 
@@ -605,7 +1139,9 @@ class EK_Dataset_pretrain_framewise_prediction(Dataset):
             filter_function = default_filter_function,
             mode='resnet', output_cache_folder='dataloader_cache/', 
             snip_threshold=32,
-            crop_type='rescale'):
+            crop_type='rescale', 
+            prune_target='known_pretrain',
+            resnet_out=True):
 
         super(EK_Dataset_pretrain_framewise_prediction, self).__init__()
 
@@ -630,12 +1166,20 @@ class EK_Dataset_pretrain_framewise_prediction(Dataset):
 
         self.output_cache_fullpath = os.path.join(os.path.join(self.output_cache_folder, self.mode + '_out'), self.crop_type)
 
-        self.image_transforms = transforms.Compose([transforms.ToPILImage(),
+        if resnet_out:
+            self.image_transforms = transforms.Compose([transforms.ToPILImage(),
                                                 transforms.Resize((224, 224)),
                                                 transforms.ToTensor(),
                                                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
                                                 GetResnetFeats()
                                                 ])
+        else:
+            self.image_transforms = transforms.Compose([transforms.ToPILImage(),
+                                                transforms.Resize((224, 224)),
+                                                transforms.ToTensor(),
+                                                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                                                ])
+            # GetResnetFeatsGeneral(version=resnet_version, mode=resnet_mode)
 
         self.DF = DatasetFactory(knowns, unknowns,
                     object_data_path, action_data_path, class_key_path)
@@ -644,22 +1188,26 @@ class EK_Dataset_pretrain_framewise_prediction(Dataset):
         # self. dataset with clips -> self.dataset with frames
         self.unknown_lowest_level_label = survey_tree(self.knowns)
 
-        self.frame_data = self.prune_to_frames()
+        self.frame_data = self.prune_to_frames(target=prune_target)
         random.shuffle(self.frame_data)
-        self.train_frame_set = self.frame_data[:-self.val_num_samples]
-        self.val_frame_set = self.frame_data[-self.val_num_samples:] 
-
-        with open(os.path.join(model_saveloc, 'processing_params.pkl'),'wb') as f:
-            pickle.dump({'output_cache_fullpath': self.output_cache_fullpath, 
-                        'crop_type': self.crop_type, 
-                        'f2bbox': self.dataset['known_frame2bbox'],
-                        'image_data_folder': self.image_data_folder, 
-                        'noun_dict': self.noun_dict, 
-                        'knowns': self.knowns, 
-                        'unknowns': self.unknowns, 
-                        'unknown_lowest_level_label': self.unknown_lowest_level_label, 
-                        'image_transform': self.image_transforms
-                        }, f )
+        if self.val_num_samples == 0:
+            self.train_frame_set = self.frame_data
+            self.val_frame_set = []
+        else:
+            self.train_frame_set = self.frame_data[:-self.val_num_samples]
+            self.val_frame_set = self.frame_data[-self.val_num_samples:] 
+        if model_saveloc is not None: 
+            with open(os.path.join(model_saveloc, 'processing_params.pkl'),'wb') as f:
+                pickle.dump({'output_cache_fullpath': self.output_cache_fullpath, 
+                            'crop_type': self.crop_type, 
+                            'f2bbox': self.dataset['known_frame2bbox'],
+                            'image_data_folder': self.image_data_folder, 
+                            'noun_dict': self.noun_dict, 
+                            'knowns': self.knowns, 
+                            'unknowns': self.unknowns, 
+                            'unknown_lowest_level_label': self.unknown_lowest_level_label, 
+                            'image_transform': self.image_transforms
+                            }, f )
 
     def prune_to_frames(self, target='known_pretrain'):
         # check that 1: has a bounding box of the known class
@@ -1417,35 +1965,50 @@ if __name__=='__main__':
     # DF = EK_Dataset(knowns, unknowns,
     #         train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
     # print(DF[2])
-    split = get_known_unknown_split()
+    split = get_known_unknown_split(required_training_knowns='EK_COCO_Imagenet_intersection.txt')
     # with open('current_split.pkl','rb') as f:
     #     split = pickle.load(f)
     knowns = split['training_known']
     unknowns = split['training_unknown']
 
-    train_ratio=0.8
+    train_ratio=0.51
     DF = DatasetFactory(knowns, unknowns, train_object_csvpath, train_action_csvpath, class_key_csvpath)
-    dataset= DF.get_dataset()
+    dataset = DF.get_dataset()
+    dataset2 = DF.get_dataset()
+
     random.shuffle(dataset['unknown'])
-    training_data = dataset['unknown'][: int(train_ratio*len(dataset['unknown']))]
-    training_dataset = dataset
-    training_dataset['unknown'] = training_data 
+    training_unknown = dataset['unknown'][: int(train_ratio*len(dataset['unknown']))]
+    training_known = dataset['known'][: int(train_ratio*len(dataset['known']))]
+    training_dataset = dataset.copy()
+    training_dataset['unknown'] = training_unknown 
+    training_dataset['known'] = training_known
 
-    validation_data = dataset['unknown'][-int((1-train_ratio)*len(dataset['unknown'])):]
-    validation_dataset = dataset
-    validation_dataset['unknown'] = validation_data
+    validation_unknown = dataset2['unknown'][-int((1-train_ratio)*len(dataset2['unknown'])):]
+    validation_known = dataset2['known'][-int((1-train_ratio)*len(dataset2['known'])):]
+    validation_dataset = dataset2.copy()
+    validation_dataset['unknown'] = validation_unknown
+    validation_dataset['known'] = validation_known
 
-    inputlayer = InputLayer()
-    import pdb; pdb.set_trace()
+    # train predictor for 3 classes: not object, known, unknown.
+    inputlayer_rpn = InputLayer(max_num_boxes=None, rpn_conf_thresh=0.0, rpn_only=True)
 
-    # DF_pretrain = EK_Dataset_pretrain_pairwise(knowns, unknowns,
-    #         train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder)
-    DF_train = EK_Dataset_discovery(knowns, unknowns,
+    DF_train = EK_Dataset_detection(knowns, unknowns,
             train_object_csvpath, train_action_csvpath, class_key_csvpath, 
-            image_data_folder, training_dataset, inputlayer,
-            device='cpu')
+            image_data_folder, training_dataset, inputlayer_rpn,
+            tree_encoder=None, 
+            purpose='resnet101', max_num_boxes=50, max_gt_boxes=6)
+    import ipdb; ipdb.set_trace()
+    DF_train[2000]
+    # DF_train.preprocess_and_cache()
+    import ipdb; ipdb.set_trace()
 
-    print(DF_train[14])
+    DF_val = EK_Dataset_detection(knowns, unknowns,
+            train_object_csvpath, train_action_csvpath, class_key_csvpath, 
+            image_data_folder, validation_dataset, inputlayer_rpn,
+            tree_encoder=None, 
+            purpose='resnet101', max_num_boxes=50, max_gt_boxes=6)
+    DF_val.preprocess_and_cache()
+
     # for i in range(4):
     #     print(DF_pretrain[112+i])
     

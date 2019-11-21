@@ -20,21 +20,30 @@ from data.EK_dataloader import *
 from data.gt_hierarchy import *
 from data.transforms import *
 from tqdm import tqdm 
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+
 
 DEVICE = 'cuda:0'
 
 def train_vanilla(net, train_dataloader, val_dataloader, optimizer_type, num_epochs, model_saveloc, lr,
-    save_interval=1):
+    save_interval=1, class_freq_path=None):
 
     if not os.path.exists(model_saveloc):
         os.makedirs(model_saveloc, exist_ok=True)
 
-    criterion = HierarchicalLoss()
+    criterion = HierarchicalLoss(class_freq=class_freq_path)
     
     if optimizer_type=='sgd':
         optimizer = torch.optim.SGD(net.parameters(), lr)
+        # scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10,
+        #                               verbose=False, threshold=1e-4, threshold_mode='rel',
+        #                               cooldown=0, min_lr=0, eps=1e-8)
+
     elif optimizer_type == 'adam':
         optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+        # scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10,
+        #                               verbose=False, threshold=1e-4, threshold_mode='rel',
+        #                               cooldown=0, min_lr=0, eps=1e-8)
 
     loss_per_sample = []
     val_losses_per50 = []
@@ -62,6 +71,8 @@ def train_vanilla(net, train_dataloader, val_dataloader, optimizer_type, num_epo
 
             x = {'handpose': handpose, 'handbbox': handbbox,
                 'frames': frames, 'unknown':unknown, 'known':known}
+            
+            optimizer.zero_grad()
 
             results = net(x)
 
@@ -105,7 +116,6 @@ def train_vanilla(net, train_dataloader, val_dataloader, optimizer_type, num_epo
 
                     val_results = net(x)
                     # print('PUSHED THROUGH NETWORK')
-
                     val_loss = criterion([val_results['tree_level_pred1'], val_results['tree_level_pred2'], val_results['tree_level_pred3']], val_hierarchy_encoding)
                     # print('EVALUATED LOSSES')
 
@@ -113,6 +123,8 @@ def train_vanilla(net, train_dataloader, val_dataloader, optimizer_type, num_epo
                     # print('APPENDED LOSSES')
                 
                 val_losses_per50.append(np.mean(val_losses))
+                # scheduler.step(np.mean(val_losses))
+
                 with open(os.path.join(model_saveloc, 'validation_losses.pkl'.format(epoch)), 
                             'wb') as f:
                     pickle.dump(val_losses_per50, f)
@@ -158,9 +170,13 @@ if __name__ == '__main__':
                         help='path to static visual tree encoder')
     parser.add_argument('--num_workers', type=int, default=0,
                         help='number of workers for the training and validation dataloaders. Default 0.')
+    parser.add_argument('--class_freq_path', type=str, default='',
+                        help='path to the pkl file containing the number of appearances of each gt label in the training set')
     args = parser.parse_args()
 
     print('num_workers = {}'.format(args.num_workers))
+
+    class_freq_path = None if len(args.class_freq_path)==0 else args.class_freq_path
 
     dataset_path = args.data
     annotations_foldername = 'annotations'
@@ -188,7 +204,7 @@ if __name__ == '__main__':
     split = get_known_unknown_split(required_training_knowns='EK_COCO_Imagenet_intersection.txt')
     knowns = split['training_known']
     unknowns = split['training_unknown']
-    import pdb; pdb.set_trace()
+
     # instantiate hand_pose_transforms: normalize every dimension wrt some batch mean and standard dev, time normalize, then into torch tensor
     handpose_transforms = transforms.Compose([
                                 FeatureNormalize(means=[0]*126, stds=[1]*126), # TODO: find actual numbers
@@ -210,9 +226,13 @@ if __name__ == '__main__':
     # instantiate video_transforms: i3d, time normalize
     video_transforms = transforms.Compose([
                                 TimeStandardize(time_normalized_dimension),
-                                I3D_feats(device='cpu' if args.num_workers else DEVICE),
+                                # I3D_feats(device='cpu' if args.num_workers else DEVICE),
                                 # transforms.ToPILImage(),
                                 # transforms.ToTensor()
+                            ])
+    video_feat_extract_transforms = transforms.Compose([
+                                I3D_feats(device='cpu' if args.num_workers else DEVICE,
+                                        cache_dir='i3d_cache', overwrite=False),
                             ])
 
     # instantiate label_transforms: just turninto torch tensor
@@ -246,20 +266,28 @@ if __name__ == '__main__':
             training_dataset, inputlayer, 
             tree_encoder=args.visual_tree_encoder,
             video_transforms=video_transforms, 
+            video_feat_extract_transforms = video_feat_extract_transforms,
             hand_pose_transforms=handpose_transforms, 
             hand_bbox_transforms=hand_bbox_transforms, 
             embedding_transforms=embedding_transforms,
             label_transforms=label_transforms,
             device='cpu' if args.num_workers else DEVICE,
             snip_threshold=36)
+
     train_dataloader= data.DataLoader(DF_train, batch_size=args.batch_size, num_workers=args.num_workers)
 
+    l1_keys, l2_keys, l3_keys =  get_tree_position_keys(knowns)
+
+    print('Layer 1 keys: {}'.format(l1_keys))
+    print('Layer 2 keys: {}'.format(l2_keys))
+    print('Layer 3 keys: {}'.format(l3_keys))
 
     DF_val = EK_Dataset_discovery(knowns, unknowns,
             train_object_csvpath, train_action_csvpath, class_key_csvpath, image_data_folder,
             validation_dataset, inputlayer, 
             tree_encoder=args.visual_tree_encoder,
             video_transforms=video_transforms, 
+            video_feat_extract_transforms = video_feat_extract_transforms,
             hand_pose_transforms=handpose_transforms, 
             hand_bbox_transforms=hand_bbox_transforms, 
             embedding_transforms=embedding_transforms,
@@ -270,7 +298,7 @@ if __name__ == '__main__':
     
 
     train_vanilla(model, train_dataloader, val_dataloader, optimizer_type=args.optimizer, 
-        num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
+        num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr, class_freq_path=class_freq_path)
 
 
     pass

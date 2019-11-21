@@ -135,7 +135,7 @@ def viz_resnet_embeddings(dataset_path, visualize_section='training'):
 
     return embeddings#, frames 
 
-def viz_pretraining_framelevel_pred_embeddings(model, dataset_path, visualize_section='training'):
+def viz_pretraining_framelevel_pred_embeddings(model, dataset_path, visualize_section='training', num_samples=1000):
     model_dir = os.path.dirname(dataset_path)
     with open(os.path.join(model_dir, 'config.json'), 'r') as f:
         config = json.load(f)
@@ -147,12 +147,14 @@ def viz_pretraining_framelevel_pred_embeddings(model, dataset_path, visualize_se
 
     data = dataset['train_set' if visualize_section=='training' else 'val_set']
 
-    if len(data) > 1000:
-        data = np.random.choice(data, 1000, replace=False)
+    if len(data) > num_samples:
+        data = np.random.choice(data, num_samples, replace=False)
     net = torch.load(model)
     net.eval()
 
     embeddings = []
+
+    l1_keys, l2_keys, l3_keys = get_tree_position_keys(processing_params['knowns']) # assuming tree_file='hierarchyV1.json'
 
     for sample in tqdm(data):
         processed_frames = EK_Dataset_pretrain_framewise_prediction.process(sample, 
@@ -167,8 +169,13 @@ def viz_pretraining_framelevel_pred_embeddings(model, dataset_path, visualize_se
 
         with torch.no_grad():
 
-            encoding = net(frame.unsqueeze(0))['embedding'][0]
-            embeddings.append((encoding.data.cpu().numpy(), label))
+            encoding = net(frame.unsqueeze(0))['embedding'][0].data.cpu().numpy()
+            hierarchy_encoding = processed_frames['hierarchy_encoding'].data.cpu().numpy()
+            # l1 and l2 labels
+            l1_label = l1_keys[(hierarchy_encoding[0])]
+            l2_label = l2_keys[(hierarchy_encoding[0], hierarchy_encoding[1])]
+
+            embeddings.append((encoding, label, l2_label, l1_label))
 
     return embeddings
 
@@ -340,8 +347,14 @@ def apply_TSNE_pairs(embeddings, output_dimensions=2, perplexity=30.0):
 
 if __name__=='__main__':
 
-    b = viz_pretraining_framelevel_pred_embeddings('models/pretraining_tree/framelevel_pred_run0/net_epoch0.pth',
-                            'models/pretraining_tree/framelevel_pred_run0/data_info.pkl', visualize_section = 'training')
+    b = viz_pretraining_framelevel_pred_embeddings('models/pretraining_tree/framelevel_pred_run15/net_epoch10.pth',
+                            'models/pretraining_tree/framelevel_pred_run15/data_info.pkl', visualize_section = 'training', 
+                            num_samples=100000)
+    import pickle
+    with open('g_embeddings.pkl', 'wb') as f:
+        pickle.dump(b, f)
+
+    import ipdb; ipdb.set_trace()
 
     a = viz_pretraining_batchwise_embeddings('models/pretraining_tree/batchwise_run12/net_epoch0.pth',
                             'models/pretraining_tree/batchwise_run12/data_info.pkl', visualize_section = 'training')

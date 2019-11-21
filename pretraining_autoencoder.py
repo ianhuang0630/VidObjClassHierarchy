@@ -33,14 +33,14 @@ MODE = 'framelevel_treeprediction'
 USERESNET = False # True
 
 def pretrain_treelevelpred(net, dataloader, valset, optimizer_type='sgd', num_epochs=10, save_interval=1, lr=0.01,
-        model_saveloc='models/pretraining_tree/treelevelpredictor'):
+        model_saveloc='models/pretraining_tree/treelevelpredictor', class_freq_path=None):
 
     # designed according to 2017's paper: Hierarchical loss for classification
     # root gets 1/2 weight, next layer gets 1/4 weight, next layer gets 1/4 weight...
     if not os.path.exists(model_saveloc):
         os.makedirs(model_saveloc, exist_ok=True)
     
-    criterion = HierarchicalLoss()
+    criterion = HierarchicalLoss(class_freq=class_freq_path)
 
     if optimizer_type=='sgd':
         optimizer = torch.optim.SGD(net.parameters(), lr)
@@ -66,7 +66,6 @@ def pretrain_treelevelpred(net, dataloader, valset, optimizer_type='sgd', num_ep
 
             optimizer.zero_grad() 
             results = net(frame)
-
             # make list of the relevant predictions
             loss = criterion([results['tree_level_pred1'], results['tree_level_pred2'], results['tree_level_pred3']], sample['hierarchy_encoding'])
             loss_per_sample.append(loss.data.cpu().numpy())
@@ -409,9 +408,16 @@ if __name__=='__main__':
                         help='type of sampling technique.')
     parser.add_argument('--selector_train_ratio', type=float, default=0.75,
                         help='Ratio of possible clips used for training')
+    parser.add_argument('--required_training_knowns', type=str, default='EK_COCO_Imagenet_intersection.txt',
+                        help='The text file with the required training_knowns')
+    parser.add_argument('--train_oracle', dest='train_oracle', default=False, action='store_true')
+    parser.add_argument('--train_oracle_intense', dest='train_oracle_intense', default=False, action='store_true')
+    parser.add_argument('--class_freq_path', type=str, default='',
+                        help='path to the pkl file containing the number of appearances of each gt label in the training set')
     # parser.add_argument('--ltfb_stack_num', type=int, default=2,
     #                     help='number of layers in ltfb, if model_mode is ltfb')
     args = parser.parse_args()
+    class_freq_path = None if len(args.class_freq_path)==0 else args.class_freq_path
 
     # Setting up the paths
     dataset_path = args.data
@@ -451,13 +457,18 @@ if __name__=='__main__':
             with open('current_split.pkl', 'rb') as f:
                 split = pickle.load(f)
     else:
+        max_training_knowns = args.max_training_knowns if args.max_training_knowns != -1 else None
         split = get_known_unknown_split(required_training_knowns= 'EK_COCO_Imagenet_intersection.txt',
-                                         max_training_knowns=args.max_training_knowns)
+                                         max_training_knowns=max_training_knowns)
 
     knowns = split['training_known']
     unknowns = split['training_unknown']
     # instantiating the dataloader
-    
+    if args.train_oracle:
+        knowns.extend(split['testing_unknown'])
+    if args.train_oracle_intense:
+        knowns= split['testing_unknown']
+
     # TOOD: transforms for the getting resnet features
     resnet_trans_indiv= transforms.Compose([Rescale((224, 224)),
                                         Transpose(),
@@ -590,7 +601,7 @@ if __name__=='__main__':
         model_saveloc = os.path.join(args.model_folder, 'framelevel_pred_run{}'.format(args.run_num))
         if not os.path.exists(model_saveloc):
             os.makedirs(model_saveloc, exist_ok=True)        
-        
+        import ipdb; ipdb.set_trace()
         # making image dataset
         DF = EK_Dataset_pretrain_framewise_prediction(knowns, unknowns,
                 train_object_csvpath, train_action_csvpath, 
@@ -608,12 +619,16 @@ if __name__=='__main__':
         train_dataloader= data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
         save_training_config(os.path.join(model_saveloc, 'config.json'), args, knowns, num_samples=len(DF))
 
+
         model = chosen_model_class(input_shape=(in_channels, 
                     image_normalized_dimensions[0] if not args.feature_extractor=='resnet' else 7, 
                     image_normalized_dimensions[1] if not args.feature_extractor=='resnet' else 7), 
-                    embedding_dim=args.embedding_dim)
+                    embedding_dim=args.embedding_dim,
+                    tree_level_option_nums = [3, 20, 40] if args.train_oracle or args.train_oracle_intense else [20,20,20])
 
-        pretrain_treelevelpred(model, train_dataloader, valset, optimizer_type=args.optimizer, num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr)
+        pretrain_treelevelpred(model, train_dataloader, valset, optimizer_type=args.optimizer, 
+                                num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr,
+                                class_freq_path=class_freq_path)
 
     else:
         raise ValueError('invalid mode')

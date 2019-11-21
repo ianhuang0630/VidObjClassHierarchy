@@ -81,6 +81,41 @@ def survey_tree(known_classes, tree_file='hierarchyV1.json'):
         counter1 += 1
     return map_
 
+
+def get_tree_position_keys(known_classes, tree_file='hierarchyV1.json'):
+    assert os.path.exists(tree_file), '{} does not exist'.format(tree_file)
+
+    with open(tree_file, 'r') as f:
+        hierarchy = json.load(f)
+    assert type(hierarchy) == dict
+
+    known_classes_set = set(known_classes)
+
+    firstlayer_keys = {}
+    secondlayer_keys = {}
+    thirdlayer_keys = {}
+
+    counter1 = 0
+    for layer1_class in hierarchy: # food, tools, others
+        counter2 = 0
+        for layer2_subhierarchy in hierarchy[layer1_class]:
+            layer2_class = list(layer2_subhierarchy.keys())[0]
+            counter3 = 0
+            for layer3_class in layer2_subhierarchy[layer2_class]:
+                if layer3_class in known_classes:
+                    thirdlayer_keys[(counter1, counter2, counter3)] = layer3_class
+                    counter3 += 1
+                else:
+                    thirdlayer_keys[(counter1, counter2)] = layer3_class
+
+            secondlayer_keys[(counter1, counter2)] = layer2_class
+            counter2 += 1
+
+        firstlayer_keys[(counter1)] = layer1_class
+        counter1 += 1
+
+    return firstlayer_keys, secondlayer_keys, thirdlayer_keys
+
 def get_tree_position(class_, known_classes, tree_file='hierarchyV1.json'):
     """ gets vector encoding of the position within the tree
     """
@@ -108,7 +143,7 @@ def get_tree_position(class_, known_classes, tree_file='hierarchyV1.json'):
                     counter3 += 1
                 elif layer3_class == class_ and layer3_class not in known_classes_set:
                     encoding = np.array([counter1, counter2, -1])
-                    counter3 += 1
+                    # counter3 += 1
                 elif layer3_class in known_classes_set:
                     counter3 += 1
             counter2 += 1

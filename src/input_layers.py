@@ -22,23 +22,42 @@ from maskrcnn_benchmark.config import cfg
 
 
 class InputLayer(object):
-    def __init__(self, cache_loc='cache/', overwrite=False, max_num_boxes=4):
+    def __init__(self, cache_loc='cache/', overwrite=False, max_num_boxes=4, rpn_conf_thresh=0.7, rpn_only=False, device='cuda'):
+        """
+        Args:
+            cache_loc:
+            overwrite: either boolean or a name in string. Could be:
+                'RP' -  overwrite region proposal only
+                'HPE' - overwrite hand position estimation only
+                'HD' - overwrite hand detection only
+                'HMP' - overwtie hand meshshpredictor only
+                Default is set to False, meaning overwrite none.
+            max_num_boxes: the number of boxes to take from region proposals. 
+                If no such quota is necessary, set to None.
+            rpn_conf_thresh: confidence threshold for the rpn
+            rpn_only: true if we're only extracting the region proposals
+        """
         self.cache_loc = cache_loc
         if not os.path.exists(self.cache_loc):
             os.makedirs(self.cache_loc)
         self.overwrite = overwrite
        
         # from hand features
-        self.HPE = processing_modules.HandPositionEstimator(overwrite=self.overwrite)
-        self.HD = processing_modules.HandDetector(overwrite=self.overwrite)
-        self.HMP = processing_modules.HandMeshPredictor(overwrite=self.overwrite)
-        
+        self.rpn_only = rpn_only
+        if not self.rpn_only:
+            self.HPE = processing_modules.HandPositionEstimator(overwrite=self.overwrite==True or self.overwrite=='HPE')
+            self.HD = processing_modules.HandDetector(overwrite=self.overwrite==True or self.overwrite=='HD')
+            self.HMP = processing_modules.HandMeshPredictor(overwrite=self.overwrite==True or self.overwrite=='HMP')
+            
         # from object 
         config_file = 'utilities/maskrcnn-benchmark/configs/caffe2/e2e_mask_rcnn_R_50_FPN_1x_caffe2.yaml'
         cfg.merge_from_file(config_file)
         #cfg.merge_from_list(['MODEL.DEVICE', 'cpu'])
-        cfg.merge_from_list(['MODEL.DEVICE', 'cuda'])
-        self.RP = object_detection_modules.RegionProposer(cfg)         
+        cfg.merge_from_list(['MODEL.DEVICE', device])
+
+        self.RP = object_detection_modules.RegionProposer(cfg, 
+                            confidence_threshold=rpn_conf_thresh, overwrite=self.overwrite==True or self.overwrite=='RP')
+
         
         self.max_num_boxes = max_num_boxes
     
@@ -84,17 +103,18 @@ class InputLayer(object):
         
         # get hand bounding box and center point
         images = [[image_loc,imread(image_loc)] for image_loc in image_locs] 
-        pose_estimate = self.HPE.process(images)
+        if not self.rpn_only:
+            pose_estimate = self.HPE.process(images)
+            
+            binary_masks = [(element['image_name'], element['binary_mask'], 
+                            element['confidence'], element['original_shape']) 
+                            for element in pose_estimate]  
+            hand_bounding_boxes = self.HD.process(binary_masks) 
+            
+            input_mesh = [(element['image_name'], element['hand']) for element in hand_bounding_boxes] 
+            mesh_joints = self.HMP.process(input_mesh)
         
-        binary_masks = [(element['image_name'], element['binary_mask'], 
-                        element['confidence'], element['original_shape']) 
-                        for element in pose_estimate]  
-        hand_bounding_boxes = self.HD.process(binary_masks) 
-        
-        input_mesh = [(element['image_name'], element['hand']) for element in hand_bounding_boxes] 
-        mesh_joints = self.HMP.process(input_mesh)
-        
-        # get hand bounding  
+        # object bounding boxes
         images_cv = [[image_loc, cv2.imread(image_loc)] for image_loc in image_locs]
         obj_bounding_boxes = self.RP.process(images_cv)
         
@@ -102,42 +122,61 @@ class InputLayer(object):
         # organization of the information
         for idx, image_loc in enumerate(image_locs):
             # first, hand location 
-            if 'left' in hand_bounding_boxes[idx]['hand']:
-                # bottom left, top right
-                left_bbox = np.array([hand_bounding_boxes[idx]['hand']['left']['left_x'],
-                                    hand_bounding_boxes[idx]['hand']['left']['bottom_y'],
-                                    hand_bounding_boxes[idx]['hand']['left']['right_x'],
-                                    hand_bounding_boxes[idx]['hand']['left']['top_y']])
-                left_pose = mesh_joints[idx]['left']['joints'].flatten()
-            else:
-                # 0000
-                left_bbox = np.zeros(4)
-                left_pose = np.zeros((21, 3)).flatten()
+            if not self.rpn_only:
+                if 'left' in hand_bounding_boxes[idx]['hand']:
+                    # bottom left, top right
+                    left_bbox = np.array([hand_bounding_boxes[idx]['hand']['left']['left_x'],
+                                        hand_bounding_boxes[idx]['hand']['left']['bottom_y'],
+                                        hand_bounding_boxes[idx]['hand']['left']['right_x'],
+                                        hand_bounding_boxes[idx]['hand']['left']['top_y']])
+                    left_pose = mesh_joints[idx]['left']['joints'].flatten()
+                else:
+                    # 0000
+                    left_bbox = np.zeros(4)
+                    left_pose = np.zeros((21, 3)).flatten()
 
-            if 'right' in hand_bounding_boxes[idx]['hand']:
-                # bottom left, top right
-                right_bbox = np.array([hand_bounding_boxes[idx]['hand']['right']['left_x'],
-                                    hand_bounding_boxes[idx]['hand']['right']['bottom_y'],
-                                    hand_bounding_boxes[idx]['hand']['right']['right_x'],
-                                    hand_bounding_boxes[idx]['hand']['right']['top_y']])
-                right_pose = mesh_joints[idx]['right']['joints'].flatten()
+                if 'right' in hand_bounding_boxes[idx]['hand']:
+                    # bottom left, top right
+                    right_bbox = np.array([hand_bounding_boxes[idx]['hand']['right']['left_x'],
+                                        hand_bounding_boxes[idx]['hand']['right']['bottom_y'],
+                                        hand_bounding_boxes[idx]['hand']['right']['right_x'],
+                                        hand_bounding_boxes[idx]['hand']['right']['top_y']])
+                    right_pose = mesh_joints[idx]['right']['joints'].flatten()
 
+                else:
+                    # 0000   
+                    right_bbox = np.zeros(4) 
+                    right_pose = np.zeros((21, 3)).flatten() 
             else:
-                # 0000   
-                right_bbox = np.zeros(4) 
-                right_pose = np.zeros((21, 3)).flatten() 
-            
+                left_bbox = None
+                left_pose = None
+                right_bbox = None
+                right_pose = None
+
             # then object bounding box -- find the ones that are the closest
-            object_bounding_boxes = np.zeros(self.max_num_boxes * 4) # intializing 
-            if len(hand_bounding_boxes[idx]['hand']) != 0 \
-                    and len(obj_bounding_boxes[idx]['bounding_boxes'].numpy())!=0:
-                selected_obj_boxes = self.filter_obj_bboxes(obj_bounding_boxes[idx]['bounding_boxes'].numpy(), 
-                                                            hand_bounding_boxes[idx]['hand'])
-                concat = np.concatenate(selected_obj_boxes)
-                object_bounding_boxes[:len(concat)] = concat
-            
+            if self.max_num_boxes is not None:
+                object_bounding_boxes = np.zeros(self.max_num_boxes * 4) # intializing 
+            else:
+                object_bounding_boxes = np.zeros(1 * 4) # just a row of zeros 
+
+            if not self.rpn_only:
+                if len(hand_bounding_boxes[idx]['hand']) != 0 \
+                        and len(obj_bounding_boxes[idx]['bounding_boxes'].numpy())!=0:
+                    if self.max_num_boxes is not None:
+                        selected_obj_boxes = self.filter_obj_bboxes(obj_bounding_boxes[idx]['bounding_boxes'].numpy(), 
+                                                                    hand_bounding_boxes[idx]['hand'])
+                        concat = np.concatenate(selected_obj_boxes)
+                        object_bounding_boxes[:len(concat)] = concat
+                    else:
+                        object_bounding_boxes = obj_bounding_boxes[idx]['bounding_boxes'].numpy()
+
+            elif self.max_num_boxes is None:
+                object_bounding_boxes = obj_bounding_boxes[idx]['bounding_boxes'].numpy()
+            else:
+                raise ValueError('Need to set rpn_only=False for max_num_boxes!=None')
+
             # left box, right box, left joints, right joints, object_bounding_box
-            if results_format=='vector': 
+            if results_format=='vector' and not self.rpn_only: 
                 results.append(np.concatenate([left_bbox, right_bbox, left_pose, right_pose, object_bounding_boxes]))
             elif results_format == 'dictionary':
                 results.append({'left_bbox': left_bbox,
@@ -147,7 +186,7 @@ class InputLayer(object):
                                 'object_bounding_boxes': object_bounding_boxes})
 
         # concatenate each of them vertically to make NxT
-        if results_format == 'vector': 
+        if results_format == 'vector' and not self.rpn_only: 
             results = np.vstack(results).transpose()
 
         return results 
@@ -169,8 +208,8 @@ if __name__=='__main__':
                     for element3 in os.listdir(lowerer_path):
                         lowererer_path = os.path.join(lowerer_path, element3)
                         images.append(lowererer_path)
-    IL = InputLayer() 
-        
+#     IL = InputLayer() 
+    IL = InputLayer(overwrite='RP', max_num_boxes=None, rpn_conf_thresh=0.0, rpn_only=True, device='cuda')
     counter = 0
     batch_size = 10 
     

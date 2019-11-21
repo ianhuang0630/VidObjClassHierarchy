@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+import os
 import sys
 sys.path.insert(0, 'src')
 from i3d import InceptionI3d
@@ -89,32 +90,52 @@ class BboxUnitScale(object):
         
 class I3D_feats(object):
     def __init__(self, weights_loc = 'models/i3d_pretrained/rgb_i3d_pretrained.pt',
-                    device='cuda:0'):
+                    device='cuda:0', cache_dir='i3d_cache', overwrite=False):
         self.device = device
         self.weights_loc = weights_loc
+        self.cache_dir = cache_dir
+        self.overwrite = overwrite
 
         i3d  = InceptionI3d(400, in_channels=3)
         i3d.replace_logits(157)
         i3d.load_state_dict(torch.load('models/i3d_pretrained/rgb_i3d_pretrained.pt'))
         self.i3d = i3d.to(self.device)
 
+        # making the cache dir if it doesn't already exist
+        if not os.path.exists(self.cache_dir): 
+            os.makedirs(self.cache_dir, exist_ok=True)
         
-    def __call__(self, frames):
-        # frames: T, W, H, 3
-        # TO: 1, 3, T, 224, 224
-        element2s = []
-        for element in frames:
-            element2 = cv2.resize(element, (224, 224))
-            element2s.append(element2)
-        
-        frames2 = np.array([np.stack(element2s).transpose([3, 0, 1, 2])])
+    def __call__(self, sample):
+        cache_filename = sample['participant_id'] + '_' + sample['video_id'] \
+                        + '_' + str(sample['start_frame']) + '_' + str(sample['end_frame']) + '.npy'
+        cache_path = os.path.join(self.cache_dir, cache_filename)
 
-        with torch.no_grad():
-            frames2 = torch.Tensor(frames2)
-            frames2 = frames2.to(self.device)
-            i3d_processed = self.i3d(frames2)
-            if len(i3d_processed.shape) == 2:
-                i3d_processed = i3d_processed.unsqueeze(2)
+        if os.path.exists(cache_path) and not self.overwrite:
+            # then load the cache file and return it
+            # import pdb; pdb.set_trace()
+            i3d_processed = np.load(cache_path)
+
+        else:
+
+            frames = sample['RGB']
+            # frames: T, W, H, 3
+            # TO: 1, 3, T, 224, 224
+            element2s = []
+            for element in frames:
+                element2 = cv2.resize(element, (224, 224))
+                element2s.append(element2)
+            
+            frames2 = np.array([np.stack(element2s).transpose([3, 0, 1, 2])])
+
+            with torch.no_grad():
+                frames2 = torch.Tensor(frames2)
+                frames2 = frames2.to(self.device)
+                i3d_processed = self.i3d(frames2)
+                if len(i3d_processed.shape) == 2:
+                    i3d_processed = i3d_processed.unsqueeze(2)
+
+            i3d_processed = i3d_processed.to('cpu').detach()
+            np.save(cache_path, i3d_processed)
 
         return i3d_processed
 
@@ -235,6 +256,45 @@ class GetResnetLastLayerFeats(object):
         elif type(d) is torch.Tensor:
             with torch.no_grad():
                 return self.model(d.unsqueeze(0))[0]
+
+class GetResnetFeatsGeneral(object):
+    def __init__(self, version, mode='vec', device = 'cuda:0', reshape=True):
+        assert mode in ('vec', 'map')
+
+        if version =='resnet18':
+            self.model = models.resnet18(pretrained=True)
+        elif version == 'resnet34':
+            self.model = models.resnet34(pretrained=True)
+        elif version == 'resnet50':
+            self.model = models.resnet50(pretrained=True)
+        elif version == 'resnet101':
+            self.model = models.resnet101(pretrained=True)
+        elif version == 'resnet152':
+            self.model = models.resnet152(pretrained=True)
+        # check that doing this makes sense for all the different models
+        if mode == 'vec':
+            self.model = nn.Sequential(*list(self.model.children())[:-1])
+        elif mode == 'map':
+            self.model = nn.Sequential(*list(self.model.children())[:-2])
+        self.device = device
+        self.model = self.model.to(self.device)
+        self.model.eval()
+
+    def __call__(self, x):
+        assert type(x) is torch.Tensor
+        x = x.to(self.device)
+        # reshape=True if x.shape[0] == 1 else False
+
+        # if reshape:
+        #     x = x.unsqueeze(0)
+
+        with torch.no_grad():
+            feat =  self.model(x)
+
+        # if reshape:
+        #     feat = feat[0]
+
+        return feat
 
 if __name__=='__main__':
     # first rescale
