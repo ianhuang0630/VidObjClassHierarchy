@@ -162,13 +162,17 @@ def evaluate_baseline_model(model, dataloader, cache=None, overwrite=True):
         for j, sample in enumerate(tqdm(dataloader)):
             frame = sample['frame']
             hierarchy_encoding = sample['hierarchy_encoding']
-
             frame = frame.type(torch.FloatTensor).to(DEVICE)
             hierarchy_encoding = hierarchy_encoding.type(torch.FloatTensor).to(DEVICE)
-
+            if 'fullframe' in sample:
+                fullframe = sample['fullframe']
+                fullframe = fullframe.type(torch.FloatTensor).to(DEVICE)
             model = model.to(DEVICE)
             with torch.no_grad():
-                preds = model(frame)
+                if 'fullframe' in sample:
+                    preds = model(frame, fullframe)
+                else:
+                    preds = model(frame)
             level1_probs = preds['tree_level_pred1'].detach().cpu().numpy()
             level1_preds = np.argmax(level1_probs[:,:3], 1).tolist()
             level2_probs = preds['tree_level_pred2'].detach().cpu().numpy().tolist()
@@ -212,6 +216,8 @@ if __name__=='__main__':
     parser.add_argument('--visual_encoder_path', type=str, 
                         default='models/pretraining_tree/framelevel_pred_run9/net_epoch99.pth',
                         help='path to tree encoder')
+    parser.add_argument('--visual_fullframe_encoder_path', type=str,
+                        default='models/pretraining_tree/framelevel_pred_fullframe_run1/net_epoch0.pth')
     parser.add_argument('--oracle_visual_encoder_path', type=str,
                         default='models/pretraining_tree/framelevel_pred_run17/net_epoch5.pth')
     parser.add_argument('--num_workers', type=int, default=8,
@@ -259,6 +265,16 @@ if __name__=='__main__':
                 mode='resnet',
                 validation_num_samples=0)
     static_val_loader = data.DataLoader(DF_static, batch_size=64, num_workers=0)
+
+    print('CONSTRUCTING DATASET FOR THE STATIC FULLFRAME MODEL')
+    DF_static_fullframe = EK_Dataset_pretrain_framewise_prediction_fullframe(test_unknowns, test_knowns, # knowns, unknowns swapped
+                train_object_csvpath, train_action_csvpath, 
+                class_key_csvpath, image_data_folder,
+                None,
+                crop_type='rescale',
+                mode='resnet',
+                validation_num_samples=0)
+    static_fullframe_val_loader = data.DataLoader(DF_static_fullframe, batch_size=64, num_workers=0)
 
     ## for clips
     # initializing the transforms
@@ -354,6 +370,10 @@ if __name__=='__main__':
     hd_model = torch.load(hd_model_path)
     hd_model.eval()
 
+    print('LOADING FULLFRAME TREE ENCODER MODEL')
+    vef_model=torch.load(args.visual_fullframe_encoder_path)
+    vef_model.eval()
+
     print('LOADING TREE ENCODER MODEL')
     ve_model = torch.load(args.visual_encoder_path)
     ve_model.eval()
@@ -366,6 +386,8 @@ if __name__=='__main__':
         '-'.join(args.oracle_visual_encoder_path.split('/')[-2:])[:-len('.pth')] + '.pkl'
     baseline_cache_name = \
         '-'.join(args.visual_encoder_path.split('/')[-2:])[:-len('.pth')] + '.pkl'
+    baseline_fullframe_cache_name = \
+        '-'.join(args.visual_fullframe_encoder_path.split('/')[-2:])[:-len('.pth')] + '.pkl'
     ourmodel_cache_name = \
         '-'.join(args.our_model_path.split('/')[-2:])[:-len('.pth')]+ '.pkl'
     video_baseline_cache_name = 'video_'+'-'.join(args.visual_encoder_path.split('/')[-2:])[:-len('.pth')] + '.pkl'
@@ -375,33 +397,38 @@ if __name__=='__main__':
         os.makedirs(args.eval_cache_path)
     oracle_cache_path = os.path.join(args.eval_cache_path, oracle_cache_name)
     baseline_cache_path = os.path.join(args.eval_cache_path, baseline_cache_name)
+    baseline_fullframe_cache_path = os.path.join(args.eval_cache_path, baseline_fullframe_cache_name)
     ourmodel_cache_path = os.path.join(args.eval_cache_path, ourmodel_cache_name)
     video_baseline_cache_path = os.path.join(args.eval_cache_path, video_baseline_cache_name)
     oracle_video_baseline_cache_path = os.path.join(args.eval_cache_path, oracle_video_baseline_cache_name)
 
-    print('ORACLE VIDEO BASELINE ACCURACY')
-    print('---------------')
-    evaluate_video_baseline(vo_model, clip_val_loader_or_vb, cache=oracle_video_baseline_cache_path, overwrite=False)
-    print('---------------')
+    # print('ORACLE VIDEO BASELINE ACCURACY')
+    # print('---------------')
+    # evaluate_video_baseline(vo_model, clip_val_loader_or_vb, cache=oracle_video_baseline_cache_path, overwrite=False)
+    # print('---------------')
 
-    print('VIDEO BASELINE ACCURACY')
-    print('---------------')
-    evaluate_video_baseline(ve_model, clip_val_loader_vb, cache=video_baseline_cache_path, overwrite=False)
-    print('---------------')
+    # print('VIDEO BASELINE ACCURACY')
+    # print('---------------')
+    # evaluate_video_baseline(ve_model, clip_val_loader_vb, cache=video_baseline_cache_path, overwrite=False)
+    # print('---------------')
 
-    print('ORACLE ACCURACY')
-    print('---------------')
-    evaluate_baseline_model(vo_model, static_val_loader, cache=oracle_cache_path, overwrite=False)
-    print('---------------')
+    # print('ORACLE ACCURACY')
+    # print('---------------')
+    # evaluate_baseline_model(vo_model, static_val_loader, cache=oracle_cache_path, overwrite=False)
+    # print('---------------')
 
-    print('BASELINE ACCURACY')
+    print('FULLFRAME ACCURACY')
     print('---------------')
-    evaluate_baseline_model(ve_model, static_val_loader, cache=baseline_cache_path, overwrite=False)
-    print('---------------')
+    evaluate_baseline_model(vef_model, static_fullframe_val_loader, cache=baseline_fullframe_cache_path, overwrite=False)
 
-    print('MODEL ACCURACY')
-    print('---------------')
-    evaluate_model(hd_model, clip_val_loader, cache=ourmodel_cache_path, overwrite=False)
-    print('---------------')
+    # print('BASELINE ACCURACY')
+    # print('---------------')
+    # evaluate_baseline_model(ve_model, static_val_loader, cache=baseline_cache_path, overwrite=False)
+    # print('---------------')
+
+    # print('MODEL ACCURACY')
+    # print('---------------')
+    # evaluate_model(hd_model, clip_val_loader, cache=ourmodel_cache_path, overwrite=False)
+    # print('---------------')
 
     pass

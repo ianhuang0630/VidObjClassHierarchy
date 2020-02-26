@@ -6,6 +6,90 @@ import torch.nn as nn
 from torch.autograd import Variable
 import numpy as np
 
+class TreeLevelPredictorWholeFrame(nn.Module):
+    def __init__(self, input_shape1, input_shape2, embedding_dim=40, tree_level_option_nums = [20,20,20]):
+        super(TreeLevelPredictorWholeFrame, self).__init__()
+
+        # softmax, dropout, relu
+        self.dropout = nn.Dropout(p=0.5)
+        self.relu = nn.ReLU()
+        self.softmax = nn.Softmax(dim=1)
+
+        # conv1, conv2
+        self.conv1 = nn.Conv2d(input_shape1[0], 32, kernel_size=(3,3))
+        self.conv2 = nn.Conv2d(32, 16, kernel_size=(3,3))
+        self.flat_shape = self.get_flat_fts(input_shape1, self.convs)
+
+        self.conv1_fullframe = nn.Conv2d(input_shape2[0], 32, kernel_size=(3,3))
+        self.conv2_fullframe = nn.Conv2d(32, 16, kernel_size=(3,3))
+        self.flat_shape_fullframe = self.get_flat_fts(input_shape2, self.convs_fullframe)
+
+        self.fc1 = nn.Linear(self.flat_shape + self.flat_shape_fullframe, embedding_dim)
+
+        # assuming that the classification is done in parallel
+        # self.fc_tl1 = nn.Linear(self.flat_shape, tree_level_option_nums[0])
+        # self.fc_tl2 = nn.Linear(self.flat_shape, tree_level_option_nums[1])
+
+        # assuming that the classification is done sequentially
+        # fc_tl1 is
+        self.fc_tl1 = nn.Linear(embedding_dim, tree_level_option_nums[0])
+        self.fc_tl2 = nn.Linear(embedding_dim + tree_level_option_nums[0],
+                                tree_level_option_nums[1])
+
+        self.fc_tl3 = nn.Linear(embedding_dim + tree_level_option_nums[0] + tree_level_option_nums[1],
+                                tree_level_option_nums[2])
+
+    def convs_fullframe(self, x):
+        h = self.relu(self.conv1_fullframe(x))
+        h = self.relu(self.conv2_fullframe(h))
+        return h
+
+    def convs(self, x):
+        h = self.relu(self.conv1(x))
+        h = self.relu(self.conv2(h))
+        return h 
+
+    def fcs(self, x):
+        embedding = self.fc1(x)
+
+        tree_level_prediction1 = self.fc_tl1(embedding)
+        tree_level_prediction1 = self.relu(tree_level_prediction1)
+        tree_level_prediction1 = self.softmax(tree_level_prediction1)
+
+        # concatenating tree_level_predictions1
+        pred1_embedding_concat = torch.cat((tree_level_prediction1, embedding), 1)
+        tree_level_prediction2 = self.fc_tl2(pred1_embedding_concat)
+        tree_level_prediction2 = self.relu(tree_level_prediction2)
+        tree_level_prediction2 = self.softmax(tree_level_prediction2)
+
+        pred2_embedding_concat = torch.cat((tree_level_prediction1, tree_level_prediction2, embedding), 1)
+        tree_level_prediction3 = self.fc_tl3(pred2_embedding_concat)
+        tree_level_prediction3 = self.relu(tree_level_prediction3)
+        tree_level_prediction3 = self.softmax(tree_level_prediction3)
+
+        return {'embedding': embedding,
+                'tree_level_pred1': tree_level_prediction1,
+                'tree_level_pred2': tree_level_prediction2,
+                'tree_level_pred3': tree_level_prediction3}
+
+    def get_flat_fts(self, in_shape, fts):
+        f = fts(Variable(torch.ones(1,*in_shape)))
+        return int(np.prod(f.size()[1:]))
+
+    def forward(self, x, fullframes):
+        h_fullframes = self.convs_fullframe(fullframes)
+        h = self.convs(x)
+        h = h.view(-1, self.flat_shape)
+        h_fullframes = h.view(-1, self.flat_shape_fullframe)
+
+        # concatenating h_fullframes
+        h_cat = torch.cat((h, h_fullframes), 1); 
+
+        results = self.fcs(h_cat)
+        return results
+
+
+
 class TreeLevelPredictor(nn.Module):
     def __init__(self, input_shape, embedding_dim=40, tree_level_option_nums = [20,20,20]):
         # input_shape = (batch_size, 512, 7, 7)

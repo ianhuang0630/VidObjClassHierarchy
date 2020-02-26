@@ -1128,6 +1128,174 @@ def blackout_crop(sample_dict, processed_frame_number, f2bbox, image_data_folder
         create_config_file(threshold, processed_frame_number, cache_dir=cache_dir)
     return frames
 
+class EK_Dataset_pretrain_framewise_prediction_fullframe(Dataset):
+    def __init__(self, knowns, unknowns,
+            object_data_path,
+            action_data_path,
+            class_key_path,
+            image_data_folder,
+            model_saveloc,
+            validation_num_samples=200,
+            filter_function = default_filter_function,
+            mode='resnet', output_cache_folder='dataloader_cache/', 
+            snip_threshold=32,
+            crop_type='rescale', 
+            prune_target='known_pretrain',
+            resnet_out=True):
+
+        super(EK_Dataset_pretrain_framewise_prediction_fullframe, self).__init__()
+
+        self.image_data_folder = image_data_folder 
+        self.knowns = knowns
+        self.unknowns = unknowns
+        self.val_num_samples = validation_num_samples
+
+        self.class_key_df = pd.read_csv(class_key_path)
+
+        self.mode = mode
+        assert self.mode == 'resnet' or self.mode == 'noresnet'
+        self.output_cache_folder = output_cache_folder
+        if not os.path.exists(self.output_cache_folder):
+            os.makedirs(self.output_cache_folder, exist_ok = True)
+        self.snip_threshold = snip_threshold
+        self.crop_type = crop_type
+        assert crop_type == 'blackout' or crop_type == 'rescale', 'crop_type must either be blackout or rescale'
+        # TODO: using the key, convert strings into unkowns
+        self.class_key_dict = dict(zip(self.class_key_df.class_key, self.class_key_df.noun_id))
+        self.noun_dict = dict(zip(self.class_key_df.noun_id, self.class_key_df.class_key))
+
+        self.output_cache_fullpath = os.path.join(os.path.join(self.output_cache_folder, self.mode + '_out'), self.crop_type)
+
+        if resnet_out:
+            self.image_transforms = transforms.Compose([transforms.ToPILImage(),
+                                                transforms.Resize((224, 224)),
+                                                transforms.ToTensor(),
+                                                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                                                GetResnetFeats()
+                                                ])
+        else:
+            self.image_transforms = transforms.Compose([transforms.ToPILImage(),
+                                                transforms.Resize((224, 224)),
+                                                transforms.ToTensor(),
+                                                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                                                ])
+            # GetResnetFeatsGeneral(version=resnet_version, mode=resnet_mode)
+
+        self.DF = DatasetFactory(knowns, unknowns,
+                    object_data_path, action_data_path, class_key_path)
+        self.dataset = self.DF.get_dataset()
+
+        # self. dataset with clips -> self.dataset with frames
+        self.unknown_lowest_level_label = survey_tree(self.knowns)
+
+        self.frame_data = self.prune_to_frames(target=prune_target)
+        random.shuffle(self.frame_data)
+        if self.val_num_samples == 0:
+            self.train_frame_set = self.frame_data
+            self.val_frame_set = []
+        else:
+            self.train_frame_set = self.frame_data[:-self.val_num_samples]
+            self.val_frame_set = self.frame_data[-self.val_num_samples:] 
+        if model_saveloc is not None: 
+            with open(os.path.join(model_saveloc, 'processing_params.pkl'),'wb') as f:
+                pickle.dump({'output_cache_fullpath': self.output_cache_fullpath, 
+                            'crop_type': self.crop_type, 
+                            'f2bbox': self.dataset['known_frame2bbox'],
+                            'image_data_folder': self.image_data_folder, 
+                            'noun_dict': self.noun_dict, 
+                            'knowns': self.knowns, 
+                            'unknowns': self.unknowns, 
+                            'unknown_lowest_level_label': self.unknown_lowest_level_label, 
+                            'image_transform': self.image_transforms
+                            }, f )
+
+    def prune_to_frames(self, target='known_pretrain'):
+        # check that 1: has a bounding box of the known class
+        frames2bbox = self.dataset['known_frame2bbox' if target in ('known_pretrain', 'known') else 'unknown_frame2bbox']
+
+        frames = []
+        for clip in self.dataset[target]:
+            vid_id = clip['video_id']
+            part_id = clip['participant_id']
+            start_frame = clip['start_frame']
+            end_frame = clip['end_frame']
+            
+            a = int(start_frame)
+            while a <= int(end_frame):
+                # process
+                key = '/'.join([part_id, vid_id, str(a)])
+                if key in frames2bbox:
+                    # check that the frame contains a bounding box of the correspoonding class
+                    candidates = [bbox for bbox in frames2bbox[key] if bbox['noun_class']==clip['noun_class']]
+                    # add bounding 
+                    for element in candidates:
+                        this_bbox = ast.literal_eval(element['bbox'])
+                        if len(this_bbox) > 0:
+                            # save: vid_id, part_id, a, this_bbox, class
+                            frames.append({'video_id': vid_id,
+                                            'participant_id': part_id,
+                                            'frame_number': a,
+                                            'bbox': this_bbox,
+                                            'noun_class': element['noun_class']})
+                a += 30
+
+        return frames
+
+    @staticmethod
+    def process(sample, noun_dict, image_transforms, image_data_folder, known_classes, scaling = 0.5):
+        # rescale crop implemented right here
+        this_bbox = sample['bbox']
+        assert len(this_bbox) >0,  'this bounding box is empty, and it is not supposed to be'
+
+        # load the image
+        file_path = sample['participant_id'] + '/' + sample['video_id'] + '/' + ('0000000000' + str(sample['frame_number']))[-10:]+'.jpg'
+        image_path = os.path.join(image_data_folder, file_path)
+        image = cv2.imread(image_path)
+
+        fullframe = cv2.resize(image,
+                    tuple([int(dim*scaling) for dim in image.shape[:2][::-1]]))
+
+        y, x, yd, xd = this_bbox[0]
+        rescaled_crop = cv2.resize(image[y:y+yd, x:x+xd, :], 
+                            tuple([int(dim*scaling) for dim in image.shape[:2][::-1]]))
+        encoding = get_tree_position(noun_dict[sample['noun_class']], known_classes)
+
+        d = {'fullframe': fullframe,
+            'frame': rescaled_crop, # making rgb
+            'noun_label': noun_dict[sample['noun_class']],
+            'hierarchy_encoding': encoding
+            }
+
+        # BGR2RGB -> transforms.ToPILImage -> transforms.Resize((224, 224)) -> normalize -> resnet
+        d['fullframe'] = image_transforms(d['fullframe'][:,:,[2,1,0]])
+        d['frame'] = image_transforms(d['frame'][:,:,[2,1,0]])
+        d['hierarchy_encoding'] = torch.from_numpy(d['hierarchy_encoding'])
+
+        return d
+
+    def get_val_dataset(self):
+        # just save valset. 
+
+        val_set = []
+
+        for frame in self.val_frame_set:
+            val_set.append(EK_Dataset_pretrain_framewise_prediction_fullframe.process(
+                                    frame, self.noun_dict, self.image_transforms, 
+                                    self.image_data_folder, self.knowns))
+
+        return val_set
+    
+    def __len__(self):
+        return len(self.train_frame_set)
+
+    def __getitem__(self, idx):
+        sample = self.train_frame_set[idx]
+        processed_sample = EK_Dataset_pretrain_framewise_prediction_fullframe.process(
+            sample, self.noun_dict, self.image_transforms,
+            self.image_data_folder, self.knowns)
+        return processed_sample
+
+
 class EK_Dataset_pretrain_framewise_prediction(Dataset):
     def __init__(self, knowns, unknowns,
             object_data_path,

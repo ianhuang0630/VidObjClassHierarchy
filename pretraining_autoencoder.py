@@ -29,7 +29,7 @@ from tqdm import tqdm
 
 DEBUG = False 
 USECUDA = True 
-MODE = 'framelevel_treeprediction'
+MODE = 'framelevel_treeprediction_fullframe'
 USERESNET = False # True
 
 def pretrain_treelevelpred(net, dataloader, valset, optimizer_type='sgd', num_epochs=10, save_interval=1, lr=0.01,
@@ -58,14 +58,21 @@ def pretrain_treelevelpred(net, dataloader, valset, optimizer_type='sgd', num_ep
 
             frame = sample['frame']
             hierarchy_encoding = sample['hierarchy_encoding']
+            if 'fullframe' in sample:
+                fullframe = sample['fullframe']
 
             if USECUDA:
                 frame = frame.type(torch.FloatTensor).to('cuda:0')
                 hierarchy_encoding = hierarchy_encoding.type(torch.FloatTensor).to('cuda:0')
+                if 'fullframe' in sample:
+                    fullframe = fullframe.type(torch.FloatTensor).to('cuda:0')
                 net = net.to('cuda:0')
 
             optimizer.zero_grad() 
-            results = net(frame)
+            if 'fullframe' in sample:
+                results = net(frame, fullframe)
+            else:
+                results = net(frame)
             # make list of the relevant predictions
             loss = criterion([results['tree_level_pred1'], results['tree_level_pred2'], results['tree_level_pred3']], sample['hierarchy_encoding'])
             loss_per_sample.append(loss.data.cpu().numpy())
@@ -81,6 +88,8 @@ def pretrain_treelevelpred(net, dataloader, valset, optimizer_type='sgd', num_ep
                 val_losses = []
                 for val_sample in valset:
                     val_frame = val_sample['frame']
+                    if 'fullframe' in val_sample:
+                        val_fullframe = sample['fullframe']
                     # val_batch_size = val_batch_stacked.shape[0]
                     # val_mini_batch_size = val_batch_stacked.shape[1]
 
@@ -90,12 +99,18 @@ def pretrain_treelevelpred(net, dataloader, valset, optimizer_type='sgd', num_ep
                     if USECUDA:
                         val_frame = val_frame.type(torch.FloatTensor).to('cuda:0')
                         val_hierarchy_encoding = val_hierarchy_encoding.type(torch.FloatTensor).to('cuda:0')
+                        if 'fullframe' in val_sample:
+                            val_fullframe = val_fullframe.type(torch.FloatTensor).to('cuda:0')
+
                         net = net.to('cuda:0')
                     with torch.no_grad():
 
                         # val_encodings = val_encodings.reshape((val_batch_size, val_mini_batch_size, -1))
                         val_frame = val_frame.unsqueeze(0)
-                        val_results = net(val_frame)
+                        if 'fullframe' in val_sample:
+                            val_results = net(val_frame, val_fullframe)
+                        else:
+                            val_results = net(val_frame)
 
                         val_hierarchy_encoding = val_hierarchy_encoding.unsqueeze(0)
                         val_loss = criterion([val_results['tree_level_pred1'], 
@@ -493,6 +508,8 @@ if __name__=='__main__':
         chosen_model_class = LongTermFeatureBank
     elif args.model_mode == 'treelevel':
         chosen_model_class = TreeLevelPredictor
+    elif args.model_mode == 'treelevelfullframe':
+        chosen_model_class = TreeLevelPredictorWholeFrame
     else:
         chosen_model_class = C3D
 
@@ -601,7 +618,6 @@ if __name__=='__main__':
         model_saveloc = os.path.join(args.model_folder, 'framelevel_pred_run{}'.format(args.run_num))
         if not os.path.exists(model_saveloc):
             os.makedirs(model_saveloc, exist_ok=True)        
-        import ipdb; ipdb.set_trace()
         # making image dataset
         DF = EK_Dataset_pretrain_framewise_prediction(knowns, unknowns,
                 train_object_csvpath, train_action_csvpath, 
@@ -630,5 +646,39 @@ if __name__=='__main__':
                                 num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr,
                                 class_freq_path=class_freq_path)
 
+    elif MODE == 'framelevel_treeprediction_fullframe':
+        model_saveloc = os.path.join(args.model_folder, 'framelevel_pred_fullframe_run{}'.format(args.run_num))
+        if not os.path.exists(model_saveloc):
+            os.makedirs(model_saveloc, exist_ok=True)        
+        # making image dataset
+        DF = EK_Dataset_pretrain_framewise_prediction_fullframe(knowns, unknowns,
+                train_object_csvpath, train_action_csvpath, 
+                class_key_csvpath, image_data_folder,
+                model_saveloc,
+                crop_type=args.crop_mode,
+                mode='resnet' if args.feature_extractor=='resnet' else 'noresnet')
+
+        valset = DF.get_val_dataset()
+
+        # now save DF.training_data, as well as DF.val_indices and DF.random_selection_indices
+        with open(os.path.join(model_saveloc, 'data_info.pkl'), 'wb') as f:
+            pickle.dump({'train_set': DF.train_frame_set, 'val_set': DF.val_frame_set}, f)
+
+        train_dataloader= data.DataLoader(DF, batch_size=args.batch_size, num_workers=0)
+        save_training_config(os.path.join(model_saveloc, 'config.json'), args, knowns, num_samples=len(DF))
+
+        model = chosen_model_class(input_shape1=(in_channels, 
+                    image_normalized_dimensions[0] if not args.feature_extractor=='resnet' else 7, 
+                    image_normalized_dimensions[1] if not args.feature_extractor=='resnet' else 7), 
+                    input_shape2=(in_channels, 
+                    image_normalized_dimensions[0] if not args.feature_extractor=='resnet' else 7, 
+                    image_normalized_dimensions[1] if not args.feature_extractor=='resnet' else 7), 
+                    embedding_dim=args.embedding_dim,
+                    tree_level_option_nums = [3, 20, 40] if args.train_oracle or args.train_oracle_intense else [20,20,20])
+        import ipdb; ipdb.set_trace()
+
+        pretrain_treelevelpred(model, train_dataloader, valset, optimizer_type=args.optimizer, 
+                                num_epochs=args.epochs, model_saveloc=model_saveloc, lr=args.lr,
+                                class_freq_path=class_freq_path)
     else:
         raise ValueError('invalid mode')
